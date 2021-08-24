@@ -40,37 +40,87 @@ interface IStaking {
     event Deposited(address account, uint256 amount, uint256 scheduleIx);
     event Slashed(address account, uint256 amount, uint256 scheduleIx);
 
+    ///@notice Allows for checking of user address in permissionedDepositors mapping
+    ///@param account Address of account being checked
+    ///@return Boolean, true if address exists in mapping
     function permissionedDepositors(address account) external returns (bool);
 
+    ///@notice Allows owner to set a multitude of schedules that an address has access to
+    ///@param account User address
+    ///@param userSchedulesIdxs Array of schedule indexes
     function setUserSchedules(address account, uint256[] calldata userSchedulesIdxs) external;
 
+    ///@notice Allows owner to add schedule
+    ///@param schedule A StakingSchedule struct that contains all info needed to make a schedule
     function addSchedule(StakingSchedule memory schedule) external;
 
-    function getSchedules() external view returns (StakingScheduleInfo[] memory);
+    ///@notice Gets all info on all schedules
+    ///@return retSchedules An array of StakingScheduleInfo struct
+    function getSchedules() external view returns (StakingScheduleInfo[] memory retSchedules);
 
+    ///@notice Allows owner to set a permissioned depositor
+    ///@param account User address
+    ///@param canDeposit Boolean representing whether user can deposit
     function setPermissionedDepositor(address account, bool canDeposit) external;
 
+    ///@notice Allows owner to remove a schedule by schedule Index
+    ///@param scheduleIndex A uint256 representing a schedule
     function removeSchedule(uint256 scheduleIndex) external;    
 
-    function getStakes(address account) external view returns(StakingDetails[] memory);
+    ///@notice Allows a user to get the stakes of an account
+    ///@param account Address that is being checked for stakes
+    ///@return stakes StakingDetails array containing info about account's stakes
+    function getStakes(address account) external view returns(StakingDetails[] memory stakes);
 
-    function balanceOf(address account) external view returns(uint256);
+    ///@notice Gets total value staked for an address across all schedules
+    ///@param account Address for which total stake is being calculated
+    ///@return value uint256 total of account
+    function balanceOf(address account) external view returns(uint256 value);
 
+    ///@notice Returns amount available to withdraw for an account and schedule Index
+    ///@param account Address that is being checked for withdrawals
+    ///@param scheduleIndex Index of schedule that is being checked for withdrawals
     function availableForWithdrawal(address account, uint256 scheduleIndex) external view returns (uint256);
 
-    function unvested(address account, uint256 scheduleIndex) external view returns(uint256);
+    ///@notice Returns unvested amount for certain address and schedule index
+    ///@param account Address being checked for unvested amount
+    ///@param scheduleIndex Schedule index being checked for unvested amount
+    ///@return value Uint256 representing unvested amount
+    function unvested(address account, uint256 scheduleIndex) external view returns(uint256 value);
 
-    function vested(address account, uint256 scheduleIndex) external view returns(uint256);
+    ///@notice Returns vested amount for address and schedule index
+    ///@param account Address being checked for vested amount
+    ///@param scheduleIndex Schedule index being checked for vested amount
+    ///@return value Uint256 vested 
+    function vested(address account, uint256 scheduleIndex) external view returns(uint256 value);
 
+    ///@notice Allows user to deposit token to specific vesting / staking schedule
+    ///@param amount Uint256 amount to be deposited
+    ///@param scheduleIndex Uint256 representing schedule to user
     function deposit(uint256 amount, uint256 scheduleIndex) external;
 
+    ///@notice Allows account to deposit on behalf of other account
+    ///@param account Account to be deposited for
+    ///@param amount Amount to be deposited
+    ///@param scheduleIndex Index of schedule to be used for deposit
     function depositFor(address account, uint256 amount, uint256 scheduleIndex) external;
 
+    ///@notice Allows permissioned depositors to deposit into custom schedule
+    ///@param account Address of account being deposited for
+    ///@param amount Uint256 amount being deposited
+    ///@param schedule StakingSchedule struct containing details needed for new schedule
     function depositWithSchedule(address account, uint256 amount, StakingSchedule calldata schedule) external;
 
+    ///@notice User can request withdrawal from staking contract at end of cycle
+    ///@notice Performs checks to make sure amount <= amount available
+    ///@param amount Amount to withdraw
     function requestWithdrawal(uint256 amount) external;
 
+    ///@notice Allows for withdrawal after successful withdraw request and proper amount of cycles passed
+    ///@param amount Amount to withdraw
     function withdraw(uint256 amount) external;
+
+    function setScheduleStatus(uint256 scheduleIndex, bool activeBoolean) external;
 
     /// @notice Pause deposits on the pool. Withdraws still allowed
     function pause() external;
