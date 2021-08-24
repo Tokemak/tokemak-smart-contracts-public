@@ -24,16 +24,21 @@ contract Manager is IManager, Initializable, AccessControl {
     bytes32 public constant ROLLOVER_ROLE = keccak256("ROLLOVER_ROLE");
     bytes32 public constant MID_CYCLE_ROLE = keccak256("MID_CYCLE_ROLE");
 
-    uint256 public currentCycle;
-    uint256 public currentCycleIndex;
-    uint256 public cycleDuration;
+    uint256 public currentCycle;  // Start block of current cycle
+    uint256 public currentCycleIndex;  // Uint representing current cycle
+    uint256 public cycleDuration;  // Cycle duration in block number
 
     bool public rolloverStarted;
 
+    // Bytes32 controller id => controller address
     mapping(bytes32 => address) public registeredControllers;
+    // Cycle index => ipfs rewards hash
     mapping(uint256 => string) public override cycleRewardsHashes;
     EnumerableSet.AddressSet private pools;
     EnumerableSet.Bytes32Set private controllerIds;
+
+    // Reentrancy Guard 
+    bool private _entered = false;
 
     modifier onlyAdmin() {
         require(hasRole(ADMIN_ROLE, _msgSender()), "NOT_ADMIN_ROLE");
@@ -48,6 +53,13 @@ contract Manager is IManager, Initializable, AccessControl {
     modifier onlyMidCycle() {
         require(hasRole(MID_CYCLE_ROLE, _msgSender()), "NOT_MID_CYCLE_ROLE");
         _;
+    }
+
+    modifier nonReentrant() {
+        require(!_entered, "ReentrancyGuard: reentrant call");
+        _entered = true;
+        _;
+        _entered = false;
     }
 
     function initialize(uint256 _cycleDuration) public initializer {
@@ -115,17 +127,19 @@ contract Manager is IManager, Initializable, AccessControl {
         _completeRollover(rewardsIpfsHash);
     }
 
+    /// @notice Used for mid-cycle adjustments
     function executeMaintenance(MaintenanceExecution calldata params)
         external
         override
         onlyMidCycle
+        nonReentrant
     {
         for (uint256 x = 0; x < params.cycleSteps.length; x++) {
             _executeControllerCommand(params.cycleSteps[x]);
         }
     }
 
-    function executeRollover(RolloverExecution calldata params) external override onlyRollover {
+    function executeRollover(RolloverExecution calldata params) external override onlyRollover nonReentrant {
         require(block.number > (currentCycle.add(cycleDuration)), "PREMATURE_EXECUTION");
 
         // Transfer deployable liquidity out of the pools and into the manager
