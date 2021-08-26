@@ -140,15 +140,15 @@ contract EthPool is ILiquidityEthPool, Initializable, ERC20, Ownable, Pausable {
 
             //subtract from global withheld liquidity (reduce) by removing the delta of (requestedAmount - newRequestedAmount)
             withheldLiquidity = withheldLiquidity.sub(
-                requestedWithdrawals[msg.sender].amount.sub(newRequestedWithdrawl)
+                requestedWithdrawals[sender].amount.sub(newRequestedWithdrawl)
             );
 
             //update the requested withdraw for user
-            requestedWithdrawals[msg.sender].amount = newRequestedWithdrawl;
+            requestedWithdrawals[sender].amount = newRequestedWithdrawl;
 
             //if the withdraw request is 0, empty it out
-            if (requestedWithdrawals[msg.sender].amount == 0) {
-                delete requestedWithdrawals[msg.sender];
+            if (requestedWithdrawals[sender].amount == 0) {
+                delete requestedWithdrawals[sender];
             }
         }
     }
