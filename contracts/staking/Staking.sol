@@ -13,8 +13,9 @@ import {SafeERC20Upgradeable as SafeERC20} from "@openzeppelin/contracts-upgrade
 import {OwnableUpgradeable as Ownable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {EnumerableSetUpgradeable as EnumerableSet} from "@openzeppelin/contracts-upgradeable/utils/EnumerableSetUpgradeable.sol";
 import {PausableUpgradeable as Pausable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {ReentrancyGuardUpgradeable as ReentrancyGuard} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
-contract Staking is IStaking, Initializable, Ownable, Pausable {
+contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.UintSet;
@@ -188,6 +189,7 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
         uint256 amount,
         uint256 scheduleIndex
     ) external override {
+        require(_isAllowedPermissionedDeposit(), "PERMISSIONED_FUNCTION");
         _depositFor(account, amount, scheduleIndex);
     }
 
@@ -227,7 +229,7 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
         emit WithdrawalRequested(msg.sender, amount);
     }
 
-    function withdraw(uint256 amount) external override whenNotPaused {
+    function withdraw(uint256 amount) external override nonReentrant whenNotPaused {
         require(amount <= requestedWithdrawals[msg.sender].amount, "WITHDRAW_INSUFFICIENT_BALANCE");
         require(amount > 0, "NO_WITHDRAWAL");
         require(
@@ -297,6 +299,11 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
         emit Slashed(account, amount, scheduleIndex);
     }
 
+    function setScheduleStatus(uint256 scheduleId, bool activeBool) external override onlyOwner {
+        StakingSchedule storage schedule = schedules[scheduleId];
+        schedule.isActive = activeBool;
+    }
+
     function pause() external override onlyOwner {
         _pause();
     }
@@ -321,7 +328,7 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
         address account,
         uint256 amount,
         uint256 scheduleIndex
-    ) private whenNotPaused {
+    ) private nonReentrant whenNotPaused {
         StakingSchedule memory schedule = schedules[scheduleIndex];
         require(amount > 0, "INVALID_AMOUNT");
         require(schedule.setup, "INVALID_SCHEDULE");
