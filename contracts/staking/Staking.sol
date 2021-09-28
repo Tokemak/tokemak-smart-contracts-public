@@ -1,3 +1,4 @@
+
 // SPDX-License-Identifier: MIT
 
 pragma solidity 0.6.11;
@@ -13,8 +14,11 @@ import {SafeERC20Upgradeable as SafeERC20} from "@openzeppelin/contracts-upgrade
 import {OwnableUpgradeable as Ownable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {EnumerableSetUpgradeable as EnumerableSet} from "@openzeppelin/contracts-upgradeable/utils/EnumerableSetUpgradeable.sol";
 import {PausableUpgradeable as Pausable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {ReentrancyGuardUpgradeable as ReentrancyGuard} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "../interfaces/events/Destinations.sol";
+import "../interfaces/events/BalanceUpdateEvent.sol";
 
-contract Staking is IStaking, Initializable, Ownable, Pausable {
+contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.UintSet;
@@ -44,9 +48,18 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
     //Can deposit into a non-public schedule
     mapping(address => bool) public override permissionedDepositors;
 
+    bool public _eventSend;
+    Destinations public destinations;
+
     modifier onlyPermissionedDepositors() {
         require(_isAllowedPermissionedDeposit(), "CALLER_NOT_PERMISSIONED");
         _;
+    }
+
+    modifier onEventSend() {
+        if(_eventSend) {
+            _;
+        }
     }
 
     function initialize(
@@ -135,7 +148,7 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
         stakes = _getStakes(account);
     }
 
-    function balanceOf(address account) external view override returns (uint256 value) {
+    function balanceOf(address account) public view override returns (uint256 value) {
         value = 0;
         uint256 scheduleCount = userStakingSchedules[account].length;
         for (uint256 i = 0; i < scheduleCount; i++) {
@@ -188,6 +201,7 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
         uint256 amount,
         uint256 scheduleIndex
     ) external override {
+        require(_isAllowedPermissionedDeposit(), "PERMISSIONED_FUNCTION");
         _depositFor(account, amount, scheduleIndex);
     }
 
@@ -224,10 +238,13 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
             requestedWithdrawals[msg.sender].minCycleIndex = manager.getCurrentCycleIndex().add(1);
         }
 
+        bytes32 eventSig = "WithdrawalRequest";
+        encodeAndSendData(eventSig, msg.sender);
+
         emit WithdrawalRequested(msg.sender, amount);
     }
 
-    function withdraw(uint256 amount) external override whenNotPaused {
+    function withdraw(uint256 amount) external override nonReentrant whenNotPaused {
         require(amount <= requestedWithdrawals[msg.sender].amount, "WITHDRAW_INSUFFICIENT_BALANCE");
         require(amount > 0, "NO_WITHDRAWAL");
         require(
@@ -263,6 +280,9 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
             delete requestedWithdrawals[msg.sender];
         }
 
+        bytes32 eventSig = "Withdraw";
+        encodeAndSendData(eventSig, msg.sender);
+
         withheldLiquidity = withheldLiquidity.sub(amount);
         tokeToken.safeTransfer(msg.sender, amount);
 
@@ -292,9 +312,17 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
         userStake.slashed = userStake.slashed.add(amount);
         userStakings[account][scheduleIndex] = userStake;
 
+        bytes32 eventSig = "Slashed";
+        encodeAndSendData(eventSig, account);
+
         tokeToken.safeTransfer(treasury, amount);
 
         emit Slashed(account, amount, scheduleIndex);
+    }
+
+    function setScheduleStatus(uint256 scheduleId, bool activeBool) external override onlyOwner {
+        StakingSchedule storage schedule = schedules[scheduleId];
+        schedule.isActive = activeBool;
     }
 
     function pause() external override onlyOwner {
@@ -303,6 +331,22 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
 
     function unpause() external override onlyOwner {
         _unpause();
+    }
+
+    function setDestinations(address _fxStateSender, address _destinationOnL2) external override onlyOwner {
+        require(_fxStateSender != address(0), "INVALID_ADDRESS");
+        require(_destinationOnL2 != address(0), "INVALID_ADDRESS");
+
+        destinations.fxStateSender = IFxStateSender(_fxStateSender);
+        destinations.destinationOnL2 = _destinationOnL2;
+
+        emit DestinationsSet(_fxStateSender, _destinationOnL2);
+    }
+
+    function setEventSend(bool _eventSendSet) external override onlyOwner {
+        _eventSend = _eventSendSet;
+
+        emit EventSendSet(_eventSendSet);
     }
 
     function _availableForWithdrawal(address account, uint256 scheduleIndex)
@@ -321,7 +365,7 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
         address account,
         uint256 amount,
         uint256 scheduleIndex
-    ) private whenNotPaused {
+    ) private nonReentrant whenNotPaused {
         StakingSchedule memory schedule = schedules[scheduleIndex];
         require(amount > 0, "INVALID_AMOUNT");
         require(schedule.setup, "INVALID_SCHEDULE");
@@ -342,6 +386,9 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
         }
         userStake.scheduleIx = scheduleIndex;
         userStakings[account][scheduleIndex] = userStake;
+
+        bytes32 eventSig = "Deposit";
+        encodeAndSendData(eventSig, account);
 
         tokeToken.safeTransferFrom(msg.sender, address(this), amount);
 
@@ -403,5 +450,20 @@ contract Staking is IStaking, Initializable, Ownable, Pausable {
 
     function _isAllowedPermissionedDeposit() private view returns (bool) {
         return permissionedDepositors[msg.sender] || msg.sender == owner();
+    }
+
+    function encodeAndSendData(bytes32 _eventSig, address _user) private onEventSend {
+        require(address(destinations.fxStateSender) != address(0), "ADDRESS_NOT_SET");
+        require(destinations.destinationOnL2 != address(0), "ADDRESS_NOT_SET");
+
+        uint256 userBalance = balanceOf(_user).sub(requestedWithdrawals[_user].amount);
+        bytes memory data = abi.encode(BalanceUpdateEvent({
+            eventSig: _eventSig,
+            account: _user, 
+            token: address(tokeToken), 
+            amount: userBalance
+        }));
+
+        destinations.fxStateSender.sendMessageToChild(destinations.destinationOnL2, data);
     }
 }

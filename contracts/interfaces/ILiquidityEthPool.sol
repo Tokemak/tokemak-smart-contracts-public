@@ -16,6 +16,10 @@ interface ILiquidityEthPool {
         uint256 amount;
     }
 
+    event DestinationsSet(address destinationOnL1, address destinationOnL2);
+    event EventSendSet(bool eventSendSet);
+    event WithdrawalRequested(address requestor, uint256 amount);
+
     /// @notice Transfers amount of underlying token from user to this pool and mints fToken to the msg.sender.
     /// @notice Depositor must have previously granted transfer approval to the pool via underlying token contract.
     /// @notice Liquidity deposited is deployed on the next cycle - unless a withdrawal request is submitted, in which case the liquidity will be withheld.
@@ -58,4 +62,10 @@ interface ILiquidityEthPool {
 
     /// @notice Unpause deposits on the pool.
     function unpause() external;
+    
+    function setDestinations(address destinationOnL1, address destinationOnL2) external;
+
+    /// @notice Sets state variable that tells contract if it can send data to EventProxy
+    /// @param eventSendSet Bool to set state variable to
+    function setEventSend(bool eventSendSet) external;
 }

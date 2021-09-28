@@ -12,6 +12,8 @@ import {SafeERC20Upgradeable as SafeERC20} from "@openzeppelin/contracts-upgrade
 import {EnumerableSetUpgradeable as EnumerableSet} from "@openzeppelin/contracts-upgradeable/utils/EnumerableSetUpgradeable.sol";
 import {SafeMathUpgradeable as SafeMath} from "@openzeppelin/contracts-upgradeable/math/SafeMathUpgradeable.sol";
 import {AccessControlUpgradeable as AccessControl} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "../interfaces/events/Destinations.sol";
+import "../interfaces/events/CycleRolloverEvent.sol";
 
 contract Manager is IManager, Initializable, AccessControl {
     using SafeMath for uint256;
@@ -24,16 +26,24 @@ contract Manager is IManager, Initializable, AccessControl {
     bytes32 public constant ROLLOVER_ROLE = keccak256("ROLLOVER_ROLE");
     bytes32 public constant MID_CYCLE_ROLE = keccak256("MID_CYCLE_ROLE");
 
-    uint256 public currentCycle;
-    uint256 public currentCycleIndex;
-    uint256 public cycleDuration;
+    uint256 public currentCycle;  // Start block of current cycle
+    uint256 public currentCycleIndex;  // Uint representing current cycle
+    uint256 public cycleDuration;  // Cycle duration in block number
 
     bool public rolloverStarted;
 
+    // Bytes32 controller id => controller address
     mapping(bytes32 => address) public registeredControllers;
+    // Cycle index => ipfs rewards hash
     mapping(uint256 => string) public override cycleRewardsHashes;
     EnumerableSet.AddressSet private pools;
     EnumerableSet.Bytes32Set private controllerIds;
+
+    // Reentrancy Guard 
+    bool private _entered;
+
+    bool public _eventSend;
+    Destinations public destinations;
 
     modifier onlyAdmin() {
         require(hasRole(ADMIN_ROLE, _msgSender()), "NOT_ADMIN_ROLE");
@@ -48,6 +58,19 @@ contract Manager is IManager, Initializable, AccessControl {
     modifier onlyMidCycle() {
         require(hasRole(MID_CYCLE_ROLE, _msgSender()), "NOT_MID_CYCLE_ROLE");
         _;
+    }
+
+    modifier nonReentrant() {
+        require(!_entered, "ReentrancyGuard: reentrant call");
+        _entered = true;
+        _;
+        _entered = false;
+    }
+
+    modifier onEventSend() {
+        if (_eventSend) {
+            _;
+        }
     }
 
     function initialize(uint256 _cycleDuration) public initializer {
@@ -115,17 +138,19 @@ contract Manager is IManager, Initializable, AccessControl {
         _completeRollover(rewardsIpfsHash);
     }
 
+    /// @notice Used for mid-cycle adjustments
     function executeMaintenance(MaintenanceExecution calldata params)
         external
         override
         onlyMidCycle
+        nonReentrant
     {
         for (uint256 x = 0; x < params.cycleSteps.length; x++) {
             _executeControllerCommand(params.cycleSteps[x]);
         }
     }
 
-    function executeRollover(RolloverExecution calldata params) external override onlyRollover {
+    function executeRollover(RolloverExecution calldata params) external override onlyRollover nonReentrant {
         require(block.number > (currentCycle.add(cycleDuration)), "PREMATURE_EXECUTION");
 
         // Transfer deployable liquidity out of the pools and into the manager
@@ -183,6 +208,10 @@ contract Manager is IManager, Initializable, AccessControl {
         cycleRewardsHashes[currentCycleIndex] = rewardsIpfsHash;
         currentCycleIndex = currentCycleIndex.add(1);
         rolloverStarted = false;
+
+        bytes32 eventSig = "Cycle Complete";
+        encodeAndSendData(eventSig);
+
         emit CycleRolloverComplete(block.number);
     }
 
@@ -200,5 +229,34 @@ contract Manager is IManager, Initializable, AccessControl {
 
     function getRolloverStatus() external view override returns (bool) {
         return rolloverStarted;
+    }
+
+    function setDestinations(address _fxStateSender, address _destinationOnL2) external override onlyAdmin {
+        require(_fxStateSender != address(0), "INVALID_ADDRESS");
+        require(_destinationOnL2 != address(0), "INVALID_ADDRESS");
+
+        destinations.fxStateSender = IFxStateSender(_fxStateSender);
+        destinations.destinationOnL2 = _destinationOnL2;
+
+        emit DestinationsSet(_fxStateSender, _destinationOnL2);
+    }
+
+    function setEventSend(bool _eventSendSet) external override onlyAdmin {
+        _eventSend = _eventSendSet;
+
+        emit EventSendSet(_eventSendSet);
+    }
+
+    function encodeAndSendData(bytes32 _eventSig) private onEventSend {
+        require(address(destinations.fxStateSender) != address(0), "ADDRESS_NOT_SET");
+        require(destinations.destinationOnL2 != address(0), "ADDRESS_NOT_SET");
+
+        bytes memory data = abi.encode(CycleRolloverEvent({
+            eventSig: _eventSig,
+            cycleIndex: currentCycleIndex,
+            blockNumber: currentCycle
+        }));
+
+        destinations.fxStateSender.sendMessageToChild(destinations.destinationOnL2, data);
     }
 }
