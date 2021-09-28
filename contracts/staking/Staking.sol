@@ -15,8 +15,11 @@ import {OwnableUpgradeable as Ownable} from "@openzeppelin/contracts-upgradeable
 import {EnumerableSetUpgradeable as EnumerableSet} from "@openzeppelin/contracts-upgradeable/utils/EnumerableSetUpgradeable.sol";
 import {PausableUpgradeable as Pausable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuardUpgradeable as ReentrancyGuard} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+<<<<<<< HEAD
 import "../interfaces/events/Destinations.sol";
 import "../interfaces/events/BalanceUpdateEvent.sol";
+=======
+>>>>>>> 01bd8628d96f3fa5b490be4e10d31fe1f19b6d8c
 
 contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard {
     using SafeMath for uint256;
@@ -451,6 +454,7 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
     function _isAllowedPermissionedDeposit() private view returns (bool) {
         return permissionedDepositors[msg.sender] || msg.sender == owner();
     }
+<<<<<<< HEAD
 
     function encodeAndSendData(bytes32 _eventSig, address _user) private onEventSend {
         require(address(destinations.fxStateSender) != address(0), "ADDRESS_NOT_SET");
@@ -467,3 +471,6 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
         destinations.fxStateSender.sendMessageToChild(destinations.destinationOnL2, data);
     }
 }
+=======
+}
+>>>>>>> 01bd8628d96f3fa5b490be4e10d31fe1f19b6d8c
