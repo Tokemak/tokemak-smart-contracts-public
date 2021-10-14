@@ -40,14 +40,10 @@ contract Manager is IManager, Initializable, AccessControl {
     EnumerableSet.Bytes32Set private controllerIds;
 
     // Reentrancy Guard 
-<<<<<<< HEAD
     bool private _entered;
 
     bool public _eventSend;
     Destinations public destinations;
-=======
-    bool private _entered = false;
->>>>>>> 01bd8628d96f3fa5b490be4e10d31fe1f19b6d8c
 
     modifier onlyAdmin() {
         require(hasRole(ADMIN_ROLE, _msgSender()), "NOT_ADMIN_ROLE");
@@ -71,15 +67,12 @@ contract Manager is IManager, Initializable, AccessControl {
         _entered = false;
     }
 
-<<<<<<< HEAD
     modifier onEventSend() {
         if (_eventSend) {
             _;
         }
     }
 
-=======
->>>>>>> 01bd8628d96f3fa5b490be4e10d31fe1f19b6d8c
     function initialize(uint256 _cycleDuration) public initializer {
         __Context_init_unchained();
         __AccessControl_init_unchained();
