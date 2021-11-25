@@ -5,9 +5,9 @@ pragma abicoder v2;
 
 import "./events/IEventReceiver.sol";
 import "./structs/TokenBalance.sol";
+import "./structs/UserVotePayload.sol";
 
 interface IVoteTracker is IEventReceiver {
-
     //Collpased simple settings
     struct VoteTrackSettings {
         address balanceTrackerAddress;
@@ -16,18 +16,10 @@ interface IVoteTracker is IEventReceiver {
         bytes32 voteSessionKey;
     }
 
-    struct UserVoteAllocationItem {
-        bytes32 reactorKey; //asset-default, in actual deployment could be asset-exchange
-        uint256 amount; //18 Decimals        
-    }
-
-    struct UserVotePayload {
-        address account;
-        bytes32 voteSessionKey;
-        uint256 nonce;
+    //Colapsed NETWORK settings
+    struct NetworkSettings {
+        bytes32 domainSeparator;
         uint256 chainId;
-        uint256 totalVotes;
-        UserVoteAllocationItem[] allocations;
     }
 
     struct UserVotes {
@@ -66,15 +58,30 @@ interface IVoteTracker is IEventReceiver {
     struct VoteTokenMultipler {
         address token;
         uint256 multiplier;
-    }    
+    }
 
     struct VotingLocation {
         address token;
-        bytes32 key;         
+        bytes32 key;
+    }
+
+    enum SignatureType {
+        INVALID,
+        EIP712,
+        ETHSIGN
+    }
+
+    struct Signature {
+        // How to validate the signature.
+        SignatureType signatureType;
+        uint8 v;
+        bytes32 r;
+        bytes32 s;
     }
 
     event UserAggregationUpdated(address account);
-    event UserVoted(address account, UserVotePayload votes); 
+    event UserVoted(address account, UserVotes votes);
+    event WithdrawalRequestApplied(address account, UserVotes postApplicationVotes);
     event VoteSessionRollover(bytes32 newKey, SystemVotes votesAtRollover);
     event BalanceTrackerAddressSet(address contractAddress);
     event ProxySubmitterSet(address[] accounts, bool allowed);
@@ -82,7 +89,7 @@ interface IVoteTracker is IEventReceiver {
     event VoteMultipliersSet(VoteTokenMultipler[] multipliers);
     event ProxyRateLimitSet(uint256 voteEveryBlockLimit);
     event SigningChainIdSet(uint256 chainId);
-    
+
     /// @notice Get the current nonce an account should use to vote with
     /// @param account Account to query
     /// @return nonce Nonce that shoul dbe used to vote with
@@ -99,20 +106,20 @@ interface IVoteTracker is IEventReceiver {
     function proxySubmitters(address account) external returns (bool allowed);
 
     /// @notice Get the tokens that are currently used to calculate voting power
-    /// @return tokens 
+    /// @return tokens
     function getVotingTokens() external view returns (address[] memory tokens);
 
     /// @notice Allows backfilling of current balance
     /// @param userVotePayload Users vote percent breakdown
-    /// @param v v from secp256k1 signature
-    /// @param r r from secp256k1 signature
-    /// @param s s from secp256k1 signature
-    function vote(UserVotePayload calldata userVotePayload, uint8 v, bytes32 r, bytes32 s) external;
+    /// @param signature Account signature
+    function vote(UserVotePayload calldata userVotePayload, Signature memory signature) external;
+
+    function voteDirect(UserVotePayload memory userVotePayload) external;
 
     /// @notice Updates the users and system aggregation based on their current balances
-    /// @param account Account that just had their balance updated
+    /// @param accounts Accounts that just had their balance updated
     /// @dev Should call back to BalanceTracker to pull that accounts current balance
-    function updateUserVoteTotals(address account) external;
+    function updateUserVoteTotals(address[] memory accounts) external;
 
     /// @notice Set the contract that should be used to lookup user balances
     /// @param contractAddress Address of the contract
@@ -129,8 +136,8 @@ interface IVoteTracker is IEventReceiver {
 
     /// @notice Set the reactors that we are currently accepting votes for
     /// @param reactorKeys Array for token+key where token is the underlying ERC20 for the reactor and key is asset-default|exchange
-    /// @param allowed Add or remove the keys from use  
-    /// @dev Only current reactor keys will be returned from getSystemVotes()  
+    /// @param allowed Add or remove the keys from use
+    /// @dev Only current reactor keys will be returned from getSystemVotes()
     function setReactorKeys(VotingLocation[] memory reactorKeys, bool allowed) external;
 
     /// @notice Changes the chain id users will sign their vote messages on
@@ -140,11 +147,11 @@ interface IVoteTracker is IEventReceiver {
     /// @notice Current votes for the account
     /// @param account Account to get votes for
     /// @return Votes for the current account
-    function getUserVotes(address account) external view returns(UserVotes memory);
+    function getUserVotes(address account) external view returns (UserVotes memory);
 
     /// @notice Current total votes for the system
     /// @return systemVotes
-    function getSystemVotes() external view returns(SystemVotes memory systemVotes);    
+    function getSystemVotes() external view returns (SystemVotes memory systemVotes);
 
     /// @notice Get the current voting power for an account
     /// @param account Account to check

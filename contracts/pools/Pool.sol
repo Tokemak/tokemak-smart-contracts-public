@@ -16,8 +16,9 @@ import {PausableUpgradeable as Pausable} from "@openzeppelin/contracts-upgradeab
 import "../interfaces/events/BalanceUpdateEvent.sol";
 import "../interfaces/events/Destinations.sol";
 import "../fxPortal/IFxStateSender.sol";
+import "../interfaces/events/IEventSender.sol";
 
-contract Pool is ILiquidityPool, Initializable, ERC20, Ownable, Pausable {
+contract Pool is ILiquidityPool, Initializable, ERC20, Ownable, Pausable, IEventSender {
     using SafeMath for uint256;
     using SafeERC20 for ERC20;
 
@@ -173,6 +174,7 @@ contract Pool is ILiquidityPool, Initializable, ERC20, Ownable, Pausable {
         public
         override
         whenNotPaused
+        nonReentrant
         returns (bool)
     {
         preTransferAdjustWithheldLiquidity(msg.sender, amount);
@@ -190,7 +192,7 @@ contract Pool is ILiquidityPool, Initializable, ERC20, Ownable, Pausable {
         address sender,
         address recipient,
         uint256 amount
-    ) public override whenNotPaused returns (bool) {
+    ) public override whenNotPaused nonReentrant returns (bool) {
         preTransferAdjustWithheldLiquidity(sender, amount);
         (bool success) = super.transferFrom(sender, recipient, amount);
 

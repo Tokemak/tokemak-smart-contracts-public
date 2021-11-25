@@ -80,6 +80,7 @@ interface IDefiRound {
     function totalValue() external view returns (uint256 value);
 
     /// @notice Current Max Total Value
+    /// @return value the max total value
     function getMaxTotalValue() external view returns (uint256 value);
 
     /// @notice returns the address of the treasury, when users claim this is where funds that are <= maxClaimableValue go

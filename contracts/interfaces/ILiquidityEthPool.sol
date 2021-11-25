@@ -16,8 +16,6 @@ interface ILiquidityEthPool {
         uint256 amount;
     }
 
-    event DestinationsSet(address destinationOnL1, address destinationOnL2);
-    event EventSendSet(bool eventSendSet);
     event WithdrawalRequested(address requestor, uint256 amount);
 
     /// @notice Transfers amount of underlying token from user to this pool and mints fToken to the msg.sender.
@@ -62,10 +60,4 @@ interface ILiquidityEthPool {
 
     /// @notice Unpause deposits on the pool.
     function unpause() external;
-    
-    function setDestinations(address destinationOnL1, address destinationOnL2) external;
-
-    /// @notice Sets state variable that tells contract if it can send data to EventProxy
-    /// @param eventSendSet Bool to set state variable to
-    function setEventSend(bool eventSendSet) external;
 }

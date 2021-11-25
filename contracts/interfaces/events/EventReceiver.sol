@@ -5,13 +5,15 @@ pragma abicoder v2;
 
 import "./IEventReceiver.sol";
 
-abstract contract EventReceiver is IEventReceiver {
+import "@openzeppelin/contracts-upgradeable/proxy/Initializable.sol";
+
+abstract contract EventReceiver is Initializable, IEventReceiver {
     
     address public eventProxy;
 
     event ProxyAddressSet(address proxyAddress);
 
-    constructor(address eventProxyAddress) {
+    function init(address eventProxyAddress) public initializer {
         require(eventProxyAddress != address(0), "INVALID_ROOT_PROXY");   
 
         _setEventProxyAddress(eventProxyAddress);

@@ -3,8 +3,9 @@
 pragma solidity 0.7.6;
 pragma abicoder v2;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import {OwnableUpgradeable as Ownable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/Initializable.sol";
 
 import "../interfaces/IBalanceTracker.sol";
 import "../interfaces/events/BalanceUpdateEvent.sol";
@@ -18,6 +19,7 @@ contract BalanceTracker is EventReceiver, IBalanceTracker, Ownable {
     bytes32 public constant EVENT_TYPE_TRANSFER = bytes32("Transfer");
     bytes32 public constant EVENT_TYPE_SLASH = bytes32("Slash");
     bytes32 public constant EVENT_TYPE_WITHDRAW = bytes32("Withdraw");
+    bytes32 public constant EVENT_TYPE_WITHDRAWALREQUEST = bytes32("Withdrawal Request");
 
     // user account address -> token address -> balance
     mapping(address => mapping(address => TokenBalance)) public accountTokenBalances;
@@ -25,7 +27,10 @@ contract BalanceTracker is EventReceiver, IBalanceTracker, Ownable {
     mapping(address => uint256) public totalTokenBalances;
 
     //solhint-disable-next-line no-empty-blocks, func-visibility
-    constructor(address eventProxy) EventReceiver(eventProxy) { }
+    function initialize(address eventProxy) public initializer { 
+        __Ownable_init_unchained();
+        EventReceiver.init(eventProxy);
+    }
 
     function getBalance(address account, address[] calldata tokens)
         external
@@ -75,7 +80,13 @@ contract BalanceTracker is EventReceiver, IBalanceTracker, Ownable {
     }
 
     function _onEventReceive(address, bytes32 eventType, bytes calldata data) internal override virtual  {
-        require(eventType == EVENT_TYPE_DEPOSIT || eventType == EVENT_TYPE_TRANSFER || eventType == EVENT_TYPE_WITHDRAW || eventType == EVENT_TYPE_SLASH, "INVALID_EVENT_TYPE");
+        require(eventType == EVENT_TYPE_DEPOSIT || 
+            eventType == EVENT_TYPE_TRANSFER ||
+            eventType == EVENT_TYPE_WITHDRAW || 
+            eventType == EVENT_TYPE_SLASH ||
+            eventType == EVENT_TYPE_WITHDRAWALREQUEST, 
+            "INVALID_EVENT_TYPE"
+        );
 
         (BalanceUpdateEvent memory balanceUpdate) = abi.decode(data, (BalanceUpdateEvent));
 
