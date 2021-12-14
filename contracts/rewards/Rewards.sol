@@ -8,30 +8,14 @@ import "@openzeppelin/contracts/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/math/Math.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "../interfaces/IRewards.sol";
 
-contract Rewards is Ownable {
+contract Rewards is Ownable, IRewards {
     using SafeMath for uint256;
     using ECDSA for bytes32;
     using SafeERC20 for IERC20;
 
-    mapping(address => uint256) public claimedAmounts;
-    
-    event SignerSet(address newSigner);
-    event Claimed(uint256 cycle, address recipient, uint256 amount);
-
-    struct EIP712Domain {
-        string name;
-        string version;
-        uint256 chainId;
-        address verifyingContract;
-    }
-
-    struct Recipient {
-        uint256 chainId;
-        uint256 cycle;
-        address wallet;
-        uint256 amount;
-    }
+    mapping(address => uint256) public override claimedAmounts;
 
     bytes32 private constant EIP712_DOMAIN_TYPEHASH =
         keccak256(
@@ -43,8 +27,8 @@ contract Rewards is Ownable {
 
     bytes32 private immutable domainSeparator;
 
-    IERC20 public immutable tokeToken;
-    address public rewardsSigner;
+    IERC20 public immutable override tokeToken;
+    address public override rewardsSigner;
 
     constructor(IERC20 token, address signerAddress) public {
         require(address(token) != address(0), "Invalid TOKE Address");
@@ -101,14 +85,19 @@ contract Rewards is Ownable {
         return id;
     }
 
-    function setSigner(address newSigner) external onlyOwner {
+    function setSigner(address newSigner) external override onlyOwner {
         require(newSigner != address(0), "Invalid Signer Address");
         rewardsSigner = newSigner;
+
+        emit SignerSet(newSigner);
     }
 
-    function getClaimableAmount(
-        Recipient calldata recipient
-    ) external view returns (uint256) {
+    function getClaimableAmount(Recipient calldata recipient)
+        external
+        view
+        override
+        returns (uint256)
+    {
         return recipient.amount.sub(claimedAmounts[recipient.wallet]);
     }
 
@@ -117,10 +106,10 @@ contract Rewards is Ownable {
         uint8 v,
         bytes32 r,
         bytes32 s // bytes calldata signature
-    ) external {        
+    ) external override {
         address signatureSigner = _hash(recipient).recover(v, r, s);
         require(signatureSigner == rewardsSigner, "Invalid Signature");
-        require(recipient.chainId == _getChainID(), "Invalid chainId");        
+        require(recipient.chainId == _getChainID(), "Invalid chainId");
         require(recipient.wallet == msg.sender, "Sender wallet Mismatch");
 
         uint256 claimableAmount = recipient.amount.sub(claimedAmounts[recipient.wallet]);
