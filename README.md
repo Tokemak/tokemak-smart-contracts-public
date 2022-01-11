@@ -30,3 +30,4 @@ A public repo of Tokemak's currently deployed contracts.
 - Rewards Contract - `0x79dD22579112d8a5F7347c5ED7E609e60da713C5`
 - Coordinator Address (Multisig) - `0x90b6C61B102eA260131aB48377E143D6EB3A9d4B`
 - Treasury Address (Multisig) - `0x8b4334d4812C530574Bd4F2763FcD22dE94A969B`
+- On Chain Vote L1 (LD) - `0x43094eD6D6d214e43C31C38dA91231D2296Ca511`
