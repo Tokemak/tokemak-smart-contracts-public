@@ -5,8 +5,11 @@ pragma experimental ABIEncoderV2;
 
 import "../fxPortal/IFxMessageProcessor.sol";
 
+/**
+ *  @title Used to route events coming from the State Sender system.
+ *  An event has a “type” and the contract can determine where it needs to be forwarded/copied for processing.
+ */
 interface IEventProxy is IFxMessageProcessor {
-
     struct DestinationsBySenderAndEventType {
         address sender;
         bytes32 eventType;
@@ -31,12 +34,21 @@ interface IEventProxy is IFxMessageProcessor {
     /// @notice For a sender/eventType, register destination contracts that should receive events
     /// @param destinationsBySenderAndEventType Destinations specifies all the destinations for a given sender/eventType combination
     /// @dev this COMPLETELY REPLACES all destinations for the sender/eventType
-    function registerDestinations(DestinationsBySenderAndEventType[] memory destinationsBySenderAndEventType) external;
+    function registerDestinations(
+        DestinationsBySenderAndEventType[] memory destinationsBySenderAndEventType
+    ) external;
 
     /// @notice retrieves all the registered destinations for a sender/eventType key
-    function getRegisteredDestinations(address sender, bytes32 eventType) external view returns(address[] memory);
+    function getRegisteredDestinations(address sender, bytes32 eventType)
+        external
+        view
+        returns (address[] memory);
 
     /// @notice For a sender, unregister destination contracts on Polygon
     /// @param sender Address of sender
-    function unregisterDestination(address sender, address l2Endpoint, bytes32 eventType) external;
+    function unregisterDestination(
+        address sender,
+        address l2Endpoint,
+        bytes32 eventType
+    ) external;
 }

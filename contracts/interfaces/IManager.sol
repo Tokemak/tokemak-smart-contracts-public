@@ -3,8 +3,12 @@
 pragma solidity 0.6.11;
 pragma experimental ABIEncoderV2;
 
+/**
+ *  @title Controls the transition and execution of liquidity deployment cycles.
+ *  Accepts instructions that can move assets from the Pools to the Exchanges
+ *  and back. Can also move assets to the treasury when appropriate.
+ */
 interface IManager {
-
     // bytes can take on the form of deploying or recovering liquidity
     struct ControllerTransferData {
         bytes32 controllerId; // controller to target
@@ -17,7 +21,7 @@ interface IManager {
     }
 
     struct MaintenanceExecution {
-         ControllerTransferData[] cycleSteps;
+        ControllerTransferData[] cycleSteps;
     }
 
     struct RolloverExecution {
@@ -36,10 +40,10 @@ interface IManager {
     event LiquidityMovedToManager(address pool, uint256 amount);
     event DeploymentStepExecuted(bytes32 controller, address adapaterAddress, bytes data);
     event LiquidityMovedToPool(address pool, uint256 amount);
-    event CycleRolloverStarted(uint256 blockNumber);
-    event CycleRolloverComplete(uint256 blockNumber);
-    event DestinationsSet(address destinationOnL1, address destinationOnL2);
-    event EventSendSet(bool eventSendSet);
+    event CycleRolloverStarted(uint256 timestamp);
+    event CycleRolloverComplete(uint256 timestamp);
+    event NextCycleStartSet(uint256 nextCycleStartTime);
+    event ManagerSwept(address[] addresses, uint256[] amounts);
 
     /// @notice Registers controller
     /// @param id Bytes32 id of controller
@@ -107,9 +111,15 @@ interface IManager {
     ///@return Bool representing whether cycle is rolling over or not
     function getRolloverStatus() external view returns (bool);
 
-    function setDestinations(address destinationOnL1, address destinationOnL2) external;
+    /// @notice Sets next cycle start time manually
+    /// @param nextCycleStartTime uint256 that represents start of next cycle
+    function setNextCycleStartTime(uint256 nextCycleStartTime) external;
 
-    /// @notice Sets state variable that tells contract if it can send data to EventProxy
-    /// @param eventSendSet Bool to set state variable to
-    function setEventSend(bool eventSendSet) external;
+    /// @notice Sweeps amanager contract for any leftover funds
+    /// @param addresses array of addresses of pools to sweep funds into
+    function sweep(address[] calldata addresses) external;
+
+    /// @notice Setup a role using internal function _setupRole
+    /// @param role keccak256 of the role keccak256("MY_ROLE");
+    function setupRole(bytes32 role) external;
 }

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+// solhint-disable max-states-count
 
 pragma solidity 0.7.6;
 pragma abicoder v2;
@@ -80,6 +81,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
     VoteTrackSettings public settings;
 
     address[] public votingTokens;
+
     mapping(address => uint256) public voteMultipliers;
 
     /// @dev Total of all user aggregations
@@ -110,8 +112,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
         settings.balanceTrackerAddress = balanceTracker;
 
         setVoteMultiplers(voteTokens);
-
-        setSigningChainId(signingOnChain);
+        _setSigningChainId(signingOnChain);
 
         networkSettings.chainId = _getChainID();
         networkSettings.domainSeparator = _buildDomainSeparator(_getChainID());
@@ -322,22 +323,19 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
         emit ReactorKeysSet(validKeys);
     }
 
-    function setSigningChainId(uint256 chainId) public override onlyOwner {
-        currentSigningChainId = chainId;
-        currentDomainSeparator = _buildDomainSeparator(chainId);
-
-        emit SigningChainIdSet(chainId);
-    }
-
     function setVoteMultiplers(VoteTokenMultipler[] memory multipliers) public override onlyOwner {
         uint256 votingTokenLength = votingTokens.length;
         if (votingTokenLength > 0) {
-            for (uint256 i = votingTokenLength; i > 0; i--) {
+            for (uint256 i = 0; i < votingTokenLength; i++) {
                 votingTokens.pop();
+                voteMultipliers[multipliers[i].token] = 0;
             }
         }
 
         for (uint256 i = 0; i < multipliers.length; i++) {
+            require(multipliers[i].multiplier > 0, "MULTIPLIER_MUST_EXIST");
+            require(voteMultipliers[multipliers[i].token] == 0, "ALREADY_EXISTS");
+
             voteMultipliers[multipliers[i].token] = multipliers[i].multiplier;
             votingTokens.push(multipliers[i].token);
         }
@@ -403,15 +401,12 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
     }
 
     function _removeUserVoteKey(address account, bytes32 reactorKey) internal whenNotPaused {
-        uint256 i = 0;
-        bool deleted = false;
-        while (i < userVoteKeys[account].length && !deleted) {
+        for (uint256 i = 0; i < userVoteKeys[account].length; i++) {
             if (userVoteKeys[account][i] == reactorKey) {
                 userVoteKeys[account][i] = userVoteKeys[account][userVoteKeys[account].length - 1];
                 userVoteKeys[account].pop();
-                deleted = true;
+                break;
             }
-            i++;
         }
     }
 
@@ -478,6 +473,13 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
         UserVotes memory votes = getUserVotes(account);
 
         emit UserVoted(account, votes);
+    }
+
+    function _setSigningChainId(uint256 chainId) private {
+        currentSigningChainId = chainId;
+        currentDomainSeparator = _buildDomainSeparator(chainId);
+
+        emit SigningChainIdSet(chainId);
     }
 
     function _onEventVote(bytes calldata data) private {

@@ -14,8 +14,10 @@ import {SafeMathUpgradeable as SafeMath} from "@openzeppelin/contracts-upgradeab
 import {AccessControlUpgradeable as AccessControl} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "../interfaces/events/Destinations.sol";
 import "../interfaces/events/CycleRolloverEvent.sol";
+import "../interfaces/events/IEventSender.sol";
 
-contract Manager is IManager, Initializable, AccessControl {
+//solhint-disable not-rely-on-time
+contract Manager is IManager, Initializable, AccessControl, IEventSender {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
     using Address for address;
@@ -25,10 +27,11 @@ contract Manager is IManager, Initializable, AccessControl {
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant ROLLOVER_ROLE = keccak256("ROLLOVER_ROLE");
     bytes32 public constant MID_CYCLE_ROLE = keccak256("MID_CYCLE_ROLE");
+    bytes32 public constant START_ROLLOVER_ROLE = keccak256("START_ROLLOVER_ROLE");
 
-    uint256 public currentCycle;  // Start block of current cycle
-    uint256 public currentCycleIndex;  // Uint representing current cycle
-    uint256 public cycleDuration;  // Cycle duration in block number
+    uint256 public currentCycle; // Start timestamp of current cycle
+    uint256 public currentCycleIndex; // Uint representing current cycle
+    uint256 public cycleDuration; // Cycle duration in seconds
 
     bool public rolloverStarted;
 
@@ -39,11 +42,15 @@ contract Manager is IManager, Initializable, AccessControl {
     EnumerableSet.AddressSet private pools;
     EnumerableSet.Bytes32Set private controllerIds;
 
-    // Reentrancy Guard 
+    // Reentrancy Guard
     bool private _entered;
 
     bool public _eventSend;
     Destinations public destinations;
+
+    uint256 public nextCycleStartTime;
+
+    bool private isLogicContract;
 
     modifier onlyAdmin() {
         require(hasRole(ADMIN_ROLE, _msgSender()), "NOT_ADMIN_ROLE");
@@ -73,7 +80,16 @@ contract Manager is IManager, Initializable, AccessControl {
         }
     }
 
-    function initialize(uint256 _cycleDuration) public initializer {
+    modifier onlyStartRollover() {
+        require(hasRole(START_ROLLOVER_ROLE, _msgSender()), "NOT_START_ROLLOVER_ROLE");
+        _;
+    }
+
+    constructor() public {
+        isLogicContract = true;
+    }
+
+    function initialize(uint256 _cycleDuration, uint256 _nextCycleStartTime) public initializer {
         __Context_init_unchained();
         __AccessControl_init_unchained();
 
@@ -84,57 +100,71 @@ contract Manager is IManager, Initializable, AccessControl {
         _setupRole(ADMIN_ROLE, _msgSender());
         _setupRole(ROLLOVER_ROLE, _msgSender());
         _setupRole(MID_CYCLE_ROLE, _msgSender());
+        _setupRole(START_ROLLOVER_ROLE, _msgSender());
+
+        setNextCycleStartTime(_nextCycleStartTime);
     }
 
     function registerController(bytes32 id, address controller) external override onlyAdmin {
-        require(!controllerIds.contains(id), "CONTROLLER_EXISTS");
         registeredControllers[id] = controller;
-        controllerIds.add(id);
+        require(controllerIds.add(id), "ADD_FAIL");
         emit ControllerRegistered(id, controller);
     }
 
     function unRegisterController(bytes32 id) external override onlyAdmin {
-        require(controllerIds.contains(id), "INVALID_CONTROLLER");
         emit ControllerUnregistered(id, registeredControllers[id]);
         delete registeredControllers[id];
-        controllerIds.remove(id);
+        require(controllerIds.remove(id), "REMOVE_FAIL");
     }
 
     function registerPool(address pool) external override onlyAdmin {
-        require(!pools.contains(pool), "POOL_EXISTS");
-        pools.add(pool);
+        require(pools.add(pool), "ADD_FAIL");
         emit PoolRegistered(pool);
     }
 
     function unRegisterPool(address pool) external override onlyAdmin {
-        require(pools.contains(pool), "INVALID_POOL");
-        pools.remove(pool);
+        require(pools.remove(pool), "REMOVE_FAIL");
         emit PoolUnregistered(pool);
     }
 
     function setCycleDuration(uint256 duration) external override onlyAdmin {
+        require(duration > 60, "CYCLE_TOO_SHORT");
         cycleDuration = duration;
         emit CycleDurationSet(duration);
     }
 
+    function setNextCycleStartTime(uint256 _nextCycleStartTime) public override onlyAdmin {
+        // We are aware of the possibility of timestamp manipulation.  It does not pose any
+        // risk based on the design of our system
+        require(_nextCycleStartTime > block.timestamp, "MUST_BE_FUTURE");
+        nextCycleStartTime = _nextCycleStartTime;
+        emit NextCycleStartSet(_nextCycleStartTime);
+    }
+
     function getPools() external view override returns (address[] memory) {
-        address[] memory returnData = new address[](pools.length());
-        for (uint256 i = 0; i < pools.length(); i++) {
+        uint256 poolsLength = pools.length();
+        address[] memory returnData = new address[](poolsLength);
+        for (uint256 i = 0; i < poolsLength; i++) {
             returnData[i] = pools.at(i);
         }
         return returnData;
     }
 
     function getControllers() external view override returns (bytes32[] memory) {
-        bytes32[] memory returnData = new bytes32[](controllerIds.length());
-        for (uint256 i = 0; i < controllerIds.length(); i++) {
+        uint256 controllerIdsLength = controllerIds.length();
+        bytes32[] memory returnData = new bytes32[](controllerIdsLength);
+        for (uint256 i = 0; i < controllerIdsLength; i++) {
             returnData[i] = controllerIds.at(i);
         }
         return returnData;
     }
 
     function completeRollover(string calldata rewardsIpfsHash) external override onlyRollover {
-        require(block.number > (currentCycle.add(cycleDuration)), "PREMATURE_EXECUTION");
+        // Can't be hit via test cases, going to leave in anyways in case we ever change code
+        require(nextCycleStartTime > 0, "SET_BEFORE_ROLLOVER");
+        // We are aware of the possibility of timestamp manipulation.  It does not pose any
+        // risk based on the design of our system
+        require(block.timestamp > nextCycleStartTime, "PREMATURE_EXECUTION");
         _completeRollover(rewardsIpfsHash);
     }
 
@@ -151,7 +181,9 @@ contract Manager is IManager, Initializable, AccessControl {
     }
 
     function executeRollover(RolloverExecution calldata params) external override onlyRollover nonReentrant {
-        require(block.number > (currentCycle.add(cycleDuration)), "PREMATURE_EXECUTION");
+        // We are aware of the possibility of timestamp manipulation.  It does not pose any
+        // risk based on the design of our system
+        require(block.timestamp > nextCycleStartTime, "PREMATURE_EXECUTION");
 
         // Transfer deployable liquidity out of the pools and into the manager
         for (uint256 i = 0; i < params.poolData.length; i++) {
@@ -191,20 +223,45 @@ contract Manager is IManager, Initializable, AccessControl {
         }
     }
 
+    function sweep(address[] calldata poolAddresses) external override onlyRollover {
+
+        uint256 length = poolAddresses.length;
+        uint256[] memory amounts = new uint256[](length);
+
+        for (uint256 i = 0; i < length; i++) {
+            address currentPoolAddress = poolAddresses[i];
+            require(pools.contains(currentPoolAddress), "INVALID_ADDRESS");
+            IERC20 underlyer = IERC20(ILiquidityPool(currentPoolAddress).underlyer());
+            uint256 amount = underlyer.balanceOf(address(this));
+            amounts[i] = amount;
+            
+            if (amount > 0) {
+                underlyer.safeTransfer(currentPoolAddress, amount);
+            }
+        }
+        emit ManagerSwept(poolAddresses, amounts);
+    }
+
     function _executeControllerCommand(ControllerTransferData calldata transfer) private {
+        require(!isLogicContract, "FORBIDDEN_CALL");
+
         address controllerAddress = registeredControllers[transfer.controllerId];
         require(controllerAddress != address(0), "INVALID_CONTROLLER");
         controllerAddress.functionDelegateCall(transfer.data, "CYCLE_STEP_EXECUTE_FAILED");
         emit DeploymentStepExecuted(transfer.controllerId, controllerAddress, transfer.data);
     }
 
-    function startCycleRollover() external override onlyRollover {
+    function startCycleRollover() external override onlyStartRollover {
+        // We are aware of the possibility of timestamp manipulation.  It does not pose any
+        // risk based on the design of our system
+        require(block.timestamp > nextCycleStartTime, "PREMATURE_EXECUTION");
         rolloverStarted = true;
-        emit CycleRolloverStarted(block.number);
+        emit CycleRolloverStarted(block.timestamp);
     }
 
     function _completeRollover(string calldata rewardsIpfsHash) private {
-        currentCycle = block.number;
+        currentCycle = nextCycleStartTime;
+        nextCycleStartTime = nextCycleStartTime.add(cycleDuration);
         cycleRewardsHashes[currentCycleIndex] = rewardsIpfsHash;
         currentCycleIndex = currentCycleIndex.add(1);
         rolloverStarted = false;
@@ -212,7 +269,7 @@ contract Manager is IManager, Initializable, AccessControl {
         bytes32 eventSig = "Cycle Complete";
         encodeAndSendData(eventSig);
 
-        emit CycleRolloverComplete(block.number);
+        emit CycleRolloverComplete(block.timestamp);
     }
 
     function getCurrentCycle() external view override returns (uint256) {
@@ -242,9 +299,15 @@ contract Manager is IManager, Initializable, AccessControl {
     }
 
     function setEventSend(bool _eventSendSet) external override onlyAdmin {
+        require(destinations.destinationOnL2 != address(0), "DESTINATIONS_NOT_SET");
+        
         _eventSend = _eventSendSet;
 
         emit EventSendSet(_eventSendSet);
+    }
+
+    function setupRole(bytes32 role) external override onlyAdmin {
+        _setupRole(role, _msgSender());
     }
 
     function encodeAndSendData(bytes32 _eventSig) private onEventSend {
@@ -254,7 +317,7 @@ contract Manager is IManager, Initializable, AccessControl {
         bytes memory data = abi.encode(CycleRolloverEvent({
             eventSig: _eventSig,
             cycleIndex: currentCycleIndex,
-            blockNumber: currentCycle
+            timestamp: currentCycle
         }));
 
         destinations.fxStateSender.sendMessageToChild(destinations.destinationOnL2, data);

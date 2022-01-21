@@ -12,10 +12,6 @@ contract RewardHash is IRewardHash, Ownable {
 
     mapping(uint256 => CycleHashTuple) public override cycleHashes;
     uint256 public latestCycleIndex;
-    
-    constructor() public { 
-        latestCycleIndex = 0;
-    }
 
     function setCycleHashes(uint256 index, string calldata latestClaimableIpfsHash, string calldata cycleIpfsHash) external override onlyOwner {
         require(bytes(latestClaimableIpfsHash).length > 0, "Invalid latestClaimableIpfsHash");

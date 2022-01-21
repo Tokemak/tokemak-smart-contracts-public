@@ -227,6 +227,8 @@ contract EthPool is ILiquidityEthPool, Initializable, ERC20, Ownable, Pausable, 
     }
 
     function setEventSend(bool _eventSendSet) external override onlyOwner {
+        require(destinations.destinationOnL2 != address(0), "DESTINATIONS_NOT_SET");
+
         _eventSend = _eventSendSet;
 
         emit EventSendSet(_eventSendSet);
