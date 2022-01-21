@@ -12,11 +12,19 @@ struct PoolInfo {
     uint64 allocPoint;
 }
 
+/// @title Interface for the SushiSwap MasterChef V2 contract
 interface IMasterChefV2 {
+    function deposit(
+        uint256 pid,
+        uint256 amount,
+        address to
+    ) external;
 
-    function deposit(uint256 pid, uint256 amount, address to) external;
-
-    function withdraw(uint256 pid, uint256 amount, address to) external;
+    function withdraw(
+        uint256 pid,
+        uint256 amount,
+        address to
+    ) external;
 
     function userInfo(uint256 pid, address user) external returns (uint256, uint256);
 }

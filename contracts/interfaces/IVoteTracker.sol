@@ -6,7 +6,13 @@ pragma abicoder v2;
 import "./events/IEventReceiver.sol";
 import "./structs/TokenBalance.sol";
 import "./structs/UserVotePayload.sol";
+import "./structs/Signature.sol";
 
+/**
+ *  @title Track and tally votes made to reactors, exchanges, pairs, etc.
+ *  Setup to accept votes submitted directly, via a bridge, or the gasless API
+ *  with an EIP712/eth_sign'd message
+ */
 interface IVoteTracker is IEventReceiver {
     //Collpased simple settings
     struct VoteTrackSettings {
@@ -63,12 +69,6 @@ interface IVoteTracker is IEventReceiver {
     struct VotingLocation {
         address token;
         bytes32 key;
-    }
-
-    enum SignatureType {
-        INVALID,
-        EIP712,
-        ETHSIGN
     }
 
     struct Signature {
@@ -139,10 +139,6 @@ interface IVoteTracker is IEventReceiver {
     /// @param allowed Add or remove the keys from use
     /// @dev Only current reactor keys will be returned from getSystemVotes()
     function setReactorKeys(VotingLocation[] memory reactorKeys, bool allowed) external;
-
-    /// @notice Changes the chain id users will sign their vote messages on
-    /// @param chainId Chain id the users will be connected to when they vote
-    function setSigningChainId(uint256 chainId) external;
 
     /// @notice Current votes for the account
     /// @param account Account to get votes for

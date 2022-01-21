@@ -7,17 +7,18 @@ import "../interfaces/IManager.sol";
 
 /// @title Interface for Pool
 /// @notice Allows users to deposit ERC-20 tokens to be deployed to market makers.
-/// @notice Mints 1:1 fToken on deposit, represeting an IOU for the undelrying token that is freely transferable.
-/// @notice Holders of fTokens earn rewards based on duration their tokens were deployed and the demand for that asset.
-/// @notice Holders of fTokens can redeem for underlying asset after issuing requestWithdrawal and waiting for the next cycle.
+/// @notice Mints 1:1 tAsset on deposit, represeting an IOU for the undelrying token that is freely transferable.
+/// @notice Holders of tAsset earn rewards based on duration their tokens were deployed and the demand for that asset.
+/// @notice Holders of tAsset can redeem for underlying asset after issuing requestWithdrawal and waiting for the next cycle.
 interface ILiquidityPool {
-
     struct WithdrawalInfo {
         uint256 minCycle;
         uint256 amount;
     }
-    
+
     event WithdrawalRequested(address requestor, uint256 amount);
+    event DepositsPaused();
+    event DepositsUnpaused();
 
     /// @notice Transfers amount of underlying token from user to this pool and mints fToken to the msg.sender.
     /// @notice Depositor must have previously granted transfer approval to the pool via underlying token contract.
@@ -58,4 +59,10 @@ interface ILiquidityPool {
 
     /// @notice Unpause deposits on the pool.
     function unpause() external;
+
+    // @notice Pause deposits only on the pool.
+    function pauseDeposit() external;
+
+    // @notice Unpause deposits only on the pool.
+    function unpauseDeposit() external;
 }

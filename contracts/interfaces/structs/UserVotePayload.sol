@@ -2,6 +2,7 @@
 
 pragma solidity 0.7.6;
 
+/// @notice Vote payload to be submitted to Vote Tracker
 struct UserVotePayload {
     address account;
     bytes32 voteSessionKey;
@@ -11,7 +12,8 @@ struct UserVotePayload {
     UserVoteAllocationItem[] allocations;
 }
 
+/// @notice Individual allocation to an asset, exchange, or asset-pair
 struct UserVoteAllocationItem {
-    bytes32 reactorKey; //asset-default, in actual deployment could be asset-exchange
+    bytes32 reactorKey;
     uint256 amount; //18 Decimals
 }

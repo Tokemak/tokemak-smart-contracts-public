@@ -54,6 +54,8 @@ contract OnChainVoteL1 is Initializable, Ownable, Pausable, IEventSender {
     }
 
     function setEventSend(bool _eventSendSet) external override onlyOwner {
+        require(destinations.destinationOnL2 != address(0), "DESTINATIONS_NOT_SET");
+        
         _eventSend = _eventSendSet;
 
         emit EventSendSet(_eventSendSet);

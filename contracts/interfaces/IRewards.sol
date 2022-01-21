@@ -5,6 +5,10 @@ pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+/**
+ *  @title Validates and distributes TOKE rewards based on the
+ *  the signed and submitted payloads
+ */
 interface IRewards {
     struct EIP712Domain {
         string name;
