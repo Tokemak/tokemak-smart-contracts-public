@@ -21,6 +21,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/Initializable.sol";
 import "../interfaces/events/EventReceiver.sol";
 import "../interfaces/structs/UserVotePayload.sol";
 
+// solhint-disable var-name-mixedcase
 contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pausable {
     using ECDSA for bytes32;
     using SafeMath for uint256;
@@ -32,21 +33,21 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
     /// @dev EIP191 header for EIP712 prefix
     string public constant EIP191_HEADER = "\x19\x01";
 
-    bytes32 public constant EIP712_DOMAIN_TYPEHASH =
+    bytes32 public immutable EIP712_DOMAIN_TYPEHASH =
         keccak256(
             "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
         );
 
-    bytes32 public constant USER_VOTE_PAYLOAD_TYPEHASH =
+    bytes32 public immutable USER_VOTE_PAYLOAD_TYPEHASH =
         keccak256(
             "UserVotePayload(address account,bytes32 voteSessionKey,uint256 nonce,uint256 chainId,uint256 totalVotes,UserVoteAllocationItem[] allocations)UserVoteAllocationItem(bytes32 reactorKey,uint256 amount)"
         );
 
-    bytes32 public constant USER_VOTE_ALLOCATION_ITEM_TYPEHASH =
+    bytes32 public immutable USER_VOTE_ALLOCATION_ITEM_TYPEHASH =
         keccak256("UserVoteAllocationItem(bytes32 reactorKey,uint256 amount)");
 
-    bytes32 public constant DOMAIN_NAME = keccak256("Tokemak Voting");
-    bytes32 public constant DOMAIN_VERSION = keccak256("1");
+    bytes32 public immutable DOMAIN_NAME = keccak256("Tokemak Voting");
+    bytes32 public immutable DOMAIN_VERSION = keccak256("1");
 
     bytes32 public constant EVENT_TYPE_DEPOSIT = bytes32("Deposit");
     bytes32 public constant EVENT_TYPE_TRANSFER = bytes32("Transfer");
@@ -452,10 +453,12 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
                 }
                 userVoteItems[account][reactorKey] = amount;
             } else {
-                userVoteKeys[account].push(reactorKey);
-                userVoteItems[account][reactorKey] = amount;
-                systemAggregations[reactorKey] = systemAggregations[reactorKey].add(amount);
-                totalUsedVotes = totalUsedVotes.add(amount);
+                if (amount > 0) {
+                    userVoteKeys[account].push(reactorKey);
+                    userVoteItems[account][reactorKey] = amount;
+                    systemAggregations[reactorKey] = systemAggregations[reactorKey].add(amount);
+                    totalUsedVotes = totalUsedVotes.add(amount);
+                }
             }
         }
 
@@ -576,7 +579,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
         return x;
     }
 
-    function _hashUserVotePayload(UserVotePayload memory userVote) private pure returns (bytes32) {
+    function _hashUserVotePayload(UserVotePayload memory userVote) private view returns (bytes32) {
         bytes32[] memory encodedVotes = new bytes32[](userVote.allocations.length);
         for (uint256 ix = 0; ix < userVote.allocations.length; ix++) {
             encodedVotes[ix] = _hashUserVoteAllocationItem(userVote.allocations[ix]);
@@ -598,7 +601,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
 
     function _hashUserVoteAllocationItem(UserVoteAllocationItem memory voteAllocation)
         private
-        pure
+        view
         returns (bytes32)
     {
         return

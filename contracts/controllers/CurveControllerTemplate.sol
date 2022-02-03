@@ -5,7 +5,6 @@ pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
-import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "../interfaces/curve/IStableSwapPool.sol";
 import "../interfaces/curve/IRegistry.sol";
@@ -15,7 +14,6 @@ import "./BaseController.sol";
 contract CurveControllerTemplate is BaseController {
     using SafeERC20 for IERC20;
     using Address for address;
-    using SafeMath for uint256;
 
     IAddressProvider public immutable addressProvider;
 
@@ -42,8 +40,9 @@ contract CurveControllerTemplate is BaseController {
         uint256 minMintAmount
     ) external onlyManager {
         address lpTokenAddress = _getLPToken(poolAddress);
+        uint256 amountsLength = amounts.length;
 
-        for (uint256 i = 0; i < amounts.length; i++) {
+        for (uint256 i = 0; i < amountsLength; i++) {
             if (amounts[i] > 0) {
                 address coin = IStableSwapPool(poolAddress).coins(i);
                 
@@ -61,7 +60,7 @@ contract CurveControllerTemplate is BaseController {
         uint256 lpTokenReceived = IStableSwapPool(poolAddress).add_liquidity(amounts, minMintAmount);
         uint256 lpTokenBalanceAfter = IERC20(lpTokenAddress).balanceOf(address(this));
 
-        require(lpTokenBalanceBefore + lpTokenReceived == lpTokenBalanceAfter, "LP_TOKEN_MISMATCH");
+        require(lpTokenBalanceBefore + lpTokenReceived == lpTokenBalanceAfter, "LP_TOKEN_AMT_MISMATCH");
     }
 
     /// @notice Withdraw liquidity from Curve pool
@@ -87,7 +86,7 @@ contract CurveControllerTemplate is BaseController {
 
         _compareCoinsBalances(coinsBalancesBefore, coinsBalancesAfter, amounts);
 
-        require(lpTokenBalanceBefore - lpTokenBurnt == lpTokenBalanceAfter, "LP_TOKEN_MISMATCH");
+        require(lpTokenBalanceBefore - lpTokenBurnt == lpTokenBalanceAfter, "LP_TOKEN_AMT_MISMATCH");
     }
 
     /// @notice Withdraw liquidity from Curve pool
@@ -113,7 +112,7 @@ contract CurveControllerTemplate is BaseController {
 
         _compareCoinsBalances(coinsBalancesBefore, coinsBalancesAfter, minAmounts);
 
-        require(lpTokenBalanceBefore - amount == lpTokenBalanceAfter, "LP_TOKEN_MISMATCH");
+        require(lpTokenBalanceBefore - amount == lpTokenBalanceAfter, "LP_TOKEN_AMT_MISMATCH");
     }
 
     /// @notice Withdraw liquidity from Curve pool
@@ -141,7 +140,7 @@ contract CurveControllerTemplate is BaseController {
         uint256 coinBalanceAfter = IERC20(coin).balanceOf(address(this));
 
         require(coinBalanceBefore < coinBalanceAfter, "BALANCE_MUST_INCREASE");
-        require(lpTokenBalanceBefore - tokenAmount == lpTokenBalanceAfter, "LP_TOKEN_MISMATCH");
+        require(lpTokenBalanceBefore - tokenAmount == lpTokenBalanceAfter, "LP_TOKEN_AMT_MISMATCH");
     }
 
     function _getLPToken(address poolAddress) internal returns (address) {
