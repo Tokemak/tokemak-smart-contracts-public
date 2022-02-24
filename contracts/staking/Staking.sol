@@ -1,5 +1,5 @@
-
 // SPDX-License-Identifier: MIT
+// solhint-disable max-states-count
 
 pragma solidity 0.6.11;
 pragma experimental ABIEncoderV2;
@@ -17,8 +17,10 @@ import {PausableUpgradeable as Pausable} from "@openzeppelin/contracts-upgradeab
 import {ReentrancyGuardUpgradeable as ReentrancyGuard} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "../interfaces/events/Destinations.sol";
 import "../interfaces/events/BalanceUpdateEvent.sol";
+import "../interfaces/IDelegateFunction.sol";
+import "../interfaces/events/IEventSender.sol";
 
-contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard {
+contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard, IEventSender {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.UintSet;
@@ -28,9 +30,9 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
 
     address public treasury;
 
-    uint256 public withheldLiquidity;
+    uint256 public withheldLiquidity; // DEPRECATED
     //userAddress -> withdrawalInfo
-    mapping(address => WithdrawalInfo) public requestedWithdrawals;
+    mapping(address => WithdrawalInfo) public requestedWithdrawals; // DEPRECATED
 
     //userAddress -> -> scheduleIndex -> staking detail
     mapping(address => mapping(uint256 => StakingDetails)) public userStakings;
@@ -51,13 +53,20 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
     bool public _eventSend;
     Destinations public destinations;
 
+    IDelegateFunction public delegateFunction; //DEPRECATED
+
+    // ScheduleIdx => notional address
+    mapping(uint256 => address) public notionalAddresses;
+    // address -> scheduleIdx -> WithdrawalInfo
+    mapping(address => mapping(uint256 => WithdrawalInfo)) public withdrawalRequestsByIndex;
+
     modifier onlyPermissionedDepositors() {
         require(_isAllowedPermissionedDeposit(), "CALLER_NOT_PERMISSIONED");
         _;
     }
 
     modifier onEventSend() {
-        if(_eventSend) {
+        if (_eventSend) {
             _;
         }
     }
@@ -65,7 +74,8 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
     function initialize(
         IERC20 _tokeToken,
         IManager _manager,
-        address _treasury
+        address _treasury,
+        address _scheduleZeroNotional
     ) public initializer {
         __Context_init_unchained();
         __Ownable_init_unchained();
@@ -90,12 +100,17 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
                 isActive: true,
                 hardStart: 0,
                 isPublic: true
-            })
+            }),
+            _scheduleZeroNotional
         );
     }
 
-    function addSchedule(StakingSchedule memory schedule) external override onlyOwner {
-        _addSchedule(schedule);
+    function addSchedule(StakingSchedule memory schedule, address notional)
+        external
+        override
+        onlyOwner
+    {
+        _addSchedule(schedule, notional);
     }
 
     function setPermissionedDepositor(address account, bool canDeposit)
@@ -104,6 +119,8 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
         onlyOwner
     {
         permissionedDepositors[account] = canDeposit;
+
+        emit PermissionedDepositorSet(account, canDeposit);
     }
 
     function setUserSchedules(address account, uint256[] calldata userSchedulesIdxs)
@@ -112,6 +129,8 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
         onlyOwner
     {
         userStakingSchedules[account] = userSchedulesIdxs;
+
+        emit UserSchedulesSet(account, userSchedulesIdxs);
     }
 
     function getSchedules()
@@ -130,15 +149,6 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
         }
     }
 
-    function removeSchedule(uint256 scheduleIndex) external override onlyOwner {
-        require(scheduleIdxs.contains(scheduleIndex), "INVALID_SCHEDULE");
-
-        scheduleIdxs.remove(scheduleIndex);
-        delete schedules[scheduleIndex];
-
-        emit ScheduleRemoved(scheduleIndex);
-    }
-
     function getStakes(address account)
         external
         view
@@ -146,6 +156,23 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
         returns (StakingDetails[] memory stakes)
     {
         stakes = _getStakes(account);
+    }
+
+    function setNotionalAddresses(uint256[] calldata scheduleIdxArr, address[] calldata addresses)
+        external
+        override
+        onlyOwner
+    {
+        require(scheduleIdxArr.length == addresses.length, "MISMATCH_LENGTH");
+        for (uint256 i = 0; i < scheduleIdxArr.length; i++) {
+            uint256 currentScheduleIdx = scheduleIdxArr[i];
+            address currentAddress = addresses[i];
+            require(scheduleIdxs.contains(currentScheduleIdx), "INDEX_DOESNT_EXIST");
+            require(currentAddress != address(0), "INVALID_ADDRESS");
+
+            notionalAddresses[currentScheduleIdx] = currentAddress;
+        }
+        emit NotionalAddressesSet(scheduleIdxArr, addresses);
     }
 
     function balanceOf(address account) public view override returns (uint256 value) {
@@ -196,133 +223,126 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
         _depositFor(msg.sender, amount, scheduleIndex);
     }
 
+    function deposit(uint256 amount) external override {
+        _depositFor(msg.sender, amount, 0);
+    }
+
     function depositFor(
         address account,
         uint256 amount,
         uint256 scheduleIndex
-    ) external override {
-        require(_isAllowedPermissionedDeposit(), "PERMISSIONED_FUNCTION");
+    ) external override onlyPermissionedDepositors {
         _depositFor(account, amount, scheduleIndex);
     }
 
     function depositWithSchedule(
         address account,
         uint256 amount,
-        StakingSchedule calldata schedule
+        StakingSchedule calldata schedule,
+        address notional
     ) external override onlyPermissionedDepositors {
         uint256 scheduleIx = nextScheduleIndex;
-        _addSchedule(schedule);
+        _addSchedule(schedule, notional);
         _depositFor(account, amount, scheduleIx);
     }
 
-    function requestWithdrawal(uint256 amount) external override {
+    function requestWithdrawal(uint256 amount, uint256 scheduleIdx) external override {
         require(amount > 0, "INVALID_AMOUNT");
-        StakingDetails[] memory stakes = _getStakes(msg.sender);
-        uint256 length = stakes.length;
-        uint256 stakedAvailable = 0;
-        for (uint256 i = 0; i < length; i++) {
-            stakedAvailable = stakedAvailable.add(
-                _availableForWithdrawal(msg.sender, stakes[i].scheduleIx)
-            );
+        require(scheduleIdxs.contains(scheduleIdx), "INVALID_SCHEDULE");
+        uint256 availableAmount = _availableForWithdrawal(msg.sender, scheduleIdx);
+        require(availableAmount >= amount, "INSUFFICIENT_AVAILABLE");
+
+        withdrawalRequestsByIndex[msg.sender][scheduleIdx].amount = amount;
+        if (manager.getRolloverStatus()) {
+            withdrawalRequestsByIndex[msg.sender][scheduleIdx].minCycleIndex = manager
+                .getCurrentCycleIndex()
+                .add(2);
+        } else {
+            withdrawalRequestsByIndex[msg.sender][scheduleIdx].minCycleIndex = manager
+                .getCurrentCycleIndex()
+                .add(1);
         }
 
-        require(stakedAvailable >= amount, "INSUFFICIENT_AVAILABLE");
-
-        withheldLiquidity = withheldLiquidity.sub(requestedWithdrawals[msg.sender].amount).add(
+        bytes32 eventSig = "Withdrawal Request";
+        StakingDetails memory userStake = userStakings[msg.sender][scheduleIdx];
+        uint256 voteTotal = userStake.initial.sub((userStake.slashed.add(userStake.withdrawn))).sub(
             amount
         );
-        requestedWithdrawals[msg.sender].amount = amount;
-        if (manager.getRolloverStatus()) {
-            requestedWithdrawals[msg.sender].minCycleIndex = manager.getCurrentCycleIndex().add(2);
-        } else {
-            requestedWithdrawals[msg.sender].minCycleIndex = manager.getCurrentCycleIndex().add(1);
-        }
+        encodeAndSendData(eventSig, msg.sender, scheduleIdx, voteTotal);
 
-        bytes32 eventSig = "WithdrawalRequest";
-        encodeAndSendData(eventSig, msg.sender);
-
-        emit WithdrawalRequested(msg.sender, amount);
+        emit WithdrawalRequested(msg.sender, scheduleIdx, amount);
     }
 
-    function withdraw(uint256 amount) external override nonReentrant whenNotPaused {
-        require(amount <= requestedWithdrawals[msg.sender].amount, "WITHDRAW_INSUFFICIENT_BALANCE");
+    function withdraw(uint256 amount, uint256 scheduleIdx)
+        external
+        override
+        nonReentrant
+        whenNotPaused
+    {
         require(amount > 0, "NO_WITHDRAWAL");
-        require(
-            requestedWithdrawals[msg.sender].minCycleIndex <= manager.getCurrentCycleIndex(),
-            "INVALID_CYCLE"
-        );
+        require(scheduleIdxs.contains(scheduleIdx), "INVALID_SCHEDULE");
+        _withdraw(amount, scheduleIdx);
+    }
 
-        StakingDetails[] memory stakes = _getStakes(msg.sender);
-        uint256 available = 0;
-        uint256 length = stakes.length;
-        uint256 remainingAmount = amount;
-        uint256 stakedAvailable = 0;
-        for (uint256 i = 0; i < length && remainingAmount > 0; i++) {
-            stakedAvailable = _availableForWithdrawal(msg.sender, stakes[i].scheduleIx);
-            available = available.add(stakedAvailable);
-            if (stakedAvailable < remainingAmount) {
-                remainingAmount = remainingAmount.sub(stakedAvailable);
-                stakes[i].withdrawn = stakes[i].withdrawn.add(stakedAvailable);
-            } else {
-                stakes[i].withdrawn = stakes[i].withdrawn.add(remainingAmount);
-                remainingAmount = 0;
-            }
-            userStakings[msg.sender][stakes[i].scheduleIx] = stakes[i];
-        }
-
-        require(remainingAmount == 0, "INSUFFICIENT_AVAILABLE"); //May not need to check this again
-
-        requestedWithdrawals[msg.sender].amount = requestedWithdrawals[msg.sender].amount.sub(
-            amount
-        );
-
-        if (requestedWithdrawals[msg.sender].amount == 0) {
-            delete requestedWithdrawals[msg.sender];
-        }
-
-        bytes32 eventSig = "Withdraw";
-        encodeAndSendData(eventSig, msg.sender);
-
-        withheldLiquidity = withheldLiquidity.sub(amount);
-        tokeToken.safeTransfer(msg.sender, amount);
-
-        emit WithdrawCompleted(msg.sender, amount);
+    function withdraw(uint256 amount) external override whenNotPaused nonReentrant {
+        require(amount > 0, "INVALID_AMOUNT");
+        _withdraw(amount, 0);
     }
 
     function slash(
-        address account,
-        uint256 amount,
+        address[] calldata accounts,
+        uint256[] calldata amounts,
         uint256 scheduleIndex
-    ) external onlyOwner whenNotPaused {
+    ) external override onlyOwner whenNotPaused {
+        require(accounts.length == amounts.length, "LENGTH_MISMATCH");
         StakingSchedule storage schedule = schedules[scheduleIndex];
-        require(amount > 0, "INVALID_AMOUNT");
         require(schedule.setup, "INVALID_SCHEDULE");
 
-        StakingDetails memory userStake = userStakings[account][scheduleIndex];
-        require(userStake.initial > 0, "NO_VESTING");
+        for (uint256 i = 0; i < accounts.length; i++) {
+            address account = accounts[i];
+            uint256 amount = amounts[i];
 
-        uint256 availableToSlash = 0;
-        uint256 remaining = userStake.initial.sub(userStake.withdrawn);
-        if (remaining > userStake.slashed) {
-            availableToSlash = remaining.sub(userStake.slashed);
+            require(amount > 0, "INVALID_AMOUNT");
+            require(account != address(0), "INVALID_ADDRESS");
+
+            StakingDetails memory userStake = userStakings[account][scheduleIndex];
+            require(userStake.initial > 0, "NO_VESTING");
+
+            uint256 availableToSlash = 0;
+            uint256 remaining = userStake.initial.sub(userStake.withdrawn);
+            if (remaining > userStake.slashed) {
+                availableToSlash = remaining.sub(userStake.slashed);
+            }
+
+            require(availableToSlash >= amount, "INSUFFICIENT_AVAILABLE");
+
+            userStake.slashed = userStake.slashed.add(amount);
+            userStakings[account][scheduleIndex] = userStake;
+
+            uint256 totalLeft = userStake.initial.sub((userStake.slashed.add(userStake.withdrawn)));
+
+            if (withdrawalRequestsByIndex[account][scheduleIndex].amount > totalLeft) {
+                withdrawalRequestsByIndex[account][scheduleIndex].amount = totalLeft;
+            }
+
+            uint256 voteAmount = totalLeft.sub(
+                withdrawalRequestsByIndex[account][scheduleIndex].amount
+            );
+            bytes32 eventSig = "Slashed";
+
+            encodeAndSendData(eventSig, account, scheduleIndex, voteAmount);
+
+            tokeToken.safeTransfer(treasury, amount);
+
+            emit Slashed(account, amount, scheduleIndex);
         }
-
-        require(availableToSlash >= amount, "INSUFFICIENT_AVAILABLE");
-
-        userStake.slashed = userStake.slashed.add(amount);
-        userStakings[account][scheduleIndex] = userStake;
-
-        bytes32 eventSig = "Slashed";
-        encodeAndSendData(eventSig, account);
-
-        tokeToken.safeTransfer(treasury, amount);
-
-        emit Slashed(account, amount, scheduleIndex);
     }
 
     function setScheduleStatus(uint256 scheduleId, bool activeBool) external override onlyOwner {
         StakingSchedule storage schedule = schedules[scheduleId];
         schedule.isActive = activeBool;
+
+        emit ScheduleStatusSet(scheduleId, activeBool);
     }
 
     function pause() external override onlyOwner {
@@ -333,7 +353,11 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
         _unpause();
     }
 
-    function setDestinations(address _fxStateSender, address _destinationOnL2) external override onlyOwner {
+    function setDestinations(address _fxStateSender, address _destinationOnL2)
+        external
+        override
+        onlyOwner
+    {
         require(_fxStateSender != address(0), "INVALID_ADDRESS");
         require(_destinationOnL2 != address(0), "INVALID_ADDRESS");
 
@@ -344,6 +368,8 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
     }
 
     function setEventSend(bool _eventSendSet) external override onlyOwner {
+        require(destinations.destinationOnL2 != address(0), "DESTINATIONS_NOT_SET");
+
         _eventSend = _eventSendSet;
 
         emit EventSendSet(_eventSendSet);
@@ -373,26 +399,38 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
         require(account != address(0), "INVALID_ADDRESS");
         require(schedule.isPublic || _isAllowedPermissionedDeposit(), "PERMISSIONED_SCHEDULE");
 
-        StakingDetails memory userStake = userStakings[account][scheduleIndex];
-        if (userStake.initial == 0) {
-            userStakingSchedules[account].push(scheduleIndex);
-        }
-        userStake.initial = userStake.initial.add(amount);
-        if (schedule.hardStart > 0) {
-            userStake.started = schedule.hardStart;
-        } else {
-            // solhint-disable-next-line not-rely-on-time
-            userStake.started = block.timestamp;
-        }
-        userStake.scheduleIx = scheduleIndex;
-        userStakings[account][scheduleIndex] = userStake;
+        StakingDetails memory userStake = _updateStakingDetails(scheduleIndex, account, amount);
 
         bytes32 eventSig = "Deposit";
-        encodeAndSendData(eventSig, account);
+        uint256 voteTotal = userStake.initial.sub((userStake.slashed.add(userStake.withdrawn))).sub(
+            withdrawalRequestsByIndex[account][scheduleIndex].amount
+        );
+        encodeAndSendData(eventSig, account, scheduleIndex, voteTotal);
 
         tokeToken.safeTransferFrom(msg.sender, address(this), amount);
 
         emit Deposited(account, amount, scheduleIndex);
+    }
+
+    function _withdraw(uint256 amount, uint256 scheduleIdx) private {
+        WithdrawalInfo memory request = withdrawalRequestsByIndex[msg.sender][scheduleIdx];
+        require(amount <= request.amount, "INSUFFICIENT_AVAILABLE");
+        require(request.minCycleIndex <= manager.getCurrentCycleIndex(), "INVALID_CYCLE");
+
+        StakingDetails memory userStake = userStakings[msg.sender][scheduleIdx];
+        userStake.withdrawn = userStake.withdrawn.add(amount);
+        userStakings[msg.sender][scheduleIdx] = userStake;
+
+        request.amount = request.amount.sub(amount);
+        withdrawalRequestsByIndex[msg.sender][scheduleIdx] = request;
+
+        if (request.amount == 0) {
+            delete withdrawalRequestsByIndex[msg.sender][scheduleIdx];
+        }
+
+        tokeToken.safeTransfer(msg.sender, amount);
+
+        emit WithdrawCompleted(msg.sender, scheduleIdx, amount);
     }
 
     function _vested(address account, uint256 scheduleIndex) private view returns (uint256) {
@@ -408,7 +446,8 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
                 value = stake.initial;
             } else {
                 uint256 secondsStaked = Math.max(timestamp.sub(cliffTimestamp), 1);
-                uint256 effectiveSecondsStaked = (secondsStaked.mul(schedule.interval)).div(
+                //Precision loss is intentional. Enables the interval buckets
+                uint256 effectiveSecondsStaked = (secondsStaked.div(schedule.interval)).mul(
                     schedule.interval
                 );
                 value = stake.initial.mul(effectiveSecondsStaked).div(schedule.duration);
@@ -418,14 +457,16 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
         return value;
     }
 
-    function _addSchedule(StakingSchedule memory schedule) private {
+    function _addSchedule(StakingSchedule memory schedule, address notional) private {
         require(schedule.duration > 0, "INVALID_DURATION");
         require(schedule.interval > 0, "INVALID_INTERVAL");
+        require(notional != address(0), "INVALID_ADDRESS");
 
         schedule.setup = true;
         uint256 index = nextScheduleIndex;
         schedules[index] = schedule;
-        scheduleIdxs.add(index);
+        notionalAddresses[index] = notional;
+        require(scheduleIdxs.add(index), "ADD_FAIL");
         nextScheduleIndex = nextScheduleIndex.add(1);
 
         emit ScheduleAdded(
@@ -435,7 +476,8 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
             schedule.interval,
             schedule.setup,
             schedule.isActive,
-            schedule.hardStart
+            schedule.hardStart,
+            notional
         );
     }
 
@@ -452,19 +494,62 @@ contract Staking is IStaking, Initializable, Ownable, Pausable, ReentrancyGuard 
         return permissionedDepositors[msg.sender] || msg.sender == owner();
     }
 
-    function encodeAndSendData(bytes32 _eventSig, address _user) private onEventSend {
+    function encodeAndSendData(
+        bytes32 _eventSig,
+        address _user,
+        uint256 _scheduleIdx,
+        uint256 _userBalance
+    ) private onEventSend {
         require(address(destinations.fxStateSender) != address(0), "ADDRESS_NOT_SET");
         require(destinations.destinationOnL2 != address(0), "ADDRESS_NOT_SET");
+        address notionalAddress = notionalAddresses[_scheduleIdx];
 
-        uint256 userBalance = balanceOf(_user).sub(requestedWithdrawals[_user].amount);
-        bytes memory data = abi.encode(BalanceUpdateEvent({
-            eventSig: _eventSig,
-            account: _user, 
-            token: address(tokeToken), 
-            amount: userBalance
-        }));
+        bytes memory data = abi.encode(
+            BalanceUpdateEvent({
+                eventSig: _eventSig,
+                account: _user,
+                token: notionalAddress,
+                amount: _userBalance
+            })
+        );
 
         destinations.fxStateSender.sendMessageToChild(destinations.destinationOnL2, data);
     }
-}
 
+    function _updateStakingDetails(
+        uint256 scheduleIdx,
+        address account,
+        uint256 amount
+    ) private returns (StakingDetails memory) {
+        StakingDetails memory stake = userStakings[account][scheduleIdx];
+        if (stake.started == 0) {
+            userStakingSchedules[account].push(scheduleIdx);
+            StakingSchedule memory schedule = schedules[scheduleIdx];
+            if (schedule.hardStart > 0) {
+                stake.started = schedule.hardStart;
+            } else {
+                //solhint-disable-next-line not-rely-on-time
+                stake.started = block.timestamp;
+            }
+        }
+        stake.initial = stake.initial.add(amount);
+        stake.scheduleIx = scheduleIdx;
+        userStakings[account][scheduleIdx] = stake;
+
+        return stake;
+    }
+
+    function depositWithdrawEvent(
+        address withdrawUser,
+        uint256 withdrawAmount,
+        uint256 withdrawScheduleIdx,
+        address depositUser,
+        uint256 depositAmount,
+        uint256 depositScheduleIdx
+    ) private {
+        bytes32 withdrawEvent = "Withdraw";
+        bytes32 depositEvent = "Deposit";
+        encodeAndSendData(withdrawEvent, withdrawUser, withdrawScheduleIdx, withdrawAmount);
+        encodeAndSendData(depositEvent, depositUser, depositScheduleIdx, depositAmount);
+    }
+}

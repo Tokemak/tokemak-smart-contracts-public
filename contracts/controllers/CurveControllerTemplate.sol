@@ -42,11 +42,12 @@ contract CurveControllerTemplate is BaseController {
         uint256 minMintAmount
     ) external onlyManager {
         address lpTokenAddress = _getLPToken(poolAddress);
+        uint256 amountsLength = amounts.length;
 
-        for (uint256 i = 0; i < amounts.length; i++) {
+        for (uint256 i = 0; i < amountsLength; i++) {
             if (amounts[i] > 0) {
                 address coin = IStableSwapPool(poolAddress).coins(i);
-                
+
                 require(addressRegistry.checkAddress(coin, 0), "INVALID_COIN");
 
                 uint256 balance = IERC20(coin).balanceOf(address(this));
@@ -58,10 +59,10 @@ contract CurveControllerTemplate is BaseController {
         }
 
         uint256 lpTokenBalanceBefore = IERC20(lpTokenAddress).balanceOf(address(this));
-        uint256 lpTokenReceived = IStableSwapPool(poolAddress).add_liquidity(amounts, minMintAmount);
+        IStableSwapPool(poolAddress).add_liquidity(amounts, minMintAmount);
         uint256 lpTokenBalanceAfter = IERC20(lpTokenAddress).balanceOf(address(this));
 
-        require(lpTokenBalanceBefore + lpTokenReceived == lpTokenBalanceAfter, "LP_TOKEN_MISMATCH");
+        require(lpTokenBalanceAfter.sub(lpTokenBalanceBefore) >= minMintAmount, "LP_AMT_TOO_LOW");
     }
 
     /// @notice Withdraw liquidity from Curve pool
@@ -80,14 +81,14 @@ contract CurveControllerTemplate is BaseController {
         uint256 lpTokenBalanceBefore = IERC20(lpTokenAddress).balanceOf(address(this));
         uint256[N_COINS] memory coinsBalancesBefore = _getCoinsBalances(poolAddress);
 
-        uint256 lpTokenBurnt = IStableSwapPool(poolAddress).remove_liquidity_imbalance(amounts, maxBurnAmount);
+        IStableSwapPool(poolAddress).remove_liquidity_imbalance(amounts, maxBurnAmount);
 
         uint256 lpTokenBalanceAfter = IERC20(lpTokenAddress).balanceOf(address(this));
         uint256[N_COINS] memory coinsBalancesAfter = _getCoinsBalances(poolAddress);
 
         _compareCoinsBalances(coinsBalancesBefore, coinsBalancesAfter, amounts);
 
-        require(lpTokenBalanceBefore - lpTokenBurnt == lpTokenBalanceAfter, "LP_TOKEN_MISMATCH");
+        require(lpTokenBalanceBefore.sub(lpTokenBalanceAfter) <= maxBurnAmount, "LP_COST_TOO_HIGH");
     }
 
     /// @notice Withdraw liquidity from Curve pool
@@ -113,7 +114,7 @@ contract CurveControllerTemplate is BaseController {
 
         _compareCoinsBalances(coinsBalancesBefore, coinsBalancesAfter, minAmounts);
 
-        require(lpTokenBalanceBefore - amount == lpTokenBalanceAfter, "LP_TOKEN_MISMATCH");
+        require(lpTokenBalanceBefore - amount == lpTokenBalanceAfter, "LP_TOKEN_AMT_MISMATCH");
     }
 
     /// @notice Withdraw liquidity from Curve pool
@@ -131,7 +132,7 @@ contract CurveControllerTemplate is BaseController {
     ) external onlyManager {
         address lpTokenAddress = _getLPTokenAndApprove(poolAddress, tokenAmount);
         address coin = IStableSwapPool(poolAddress).coins(uint256(i));
-        
+
         uint256 lpTokenBalanceBefore = IERC20(lpTokenAddress).balanceOf(address(this));
         uint256 coinBalanceBefore = IERC20(coin).balanceOf(address(this));
 
@@ -141,7 +142,7 @@ contract CurveControllerTemplate is BaseController {
         uint256 coinBalanceAfter = IERC20(coin).balanceOf(address(this));
 
         require(coinBalanceBefore < coinBalanceAfter, "BALANCE_MUST_INCREASE");
-        require(lpTokenBalanceBefore - tokenAmount == lpTokenBalanceAfter, "LP_TOKEN_MISMATCH");
+        require(lpTokenBalanceBefore - tokenAmount == lpTokenBalanceAfter, "LP_TOKEN_AMT_MISMATCH");
     }
 
     function _getLPToken(address poolAddress) internal returns (address) {
@@ -161,7 +162,10 @@ contract CurveControllerTemplate is BaseController {
         return lpTokenAddress;
     }
 
-    function _getCoinsBalances(address poolAddress) internal returns (uint256[N_COINS] memory coinsBalances) {
+    function _getCoinsBalances(address poolAddress)
+        internal
+        returns (uint256[N_COINS] memory coinsBalances)
+    {
         for (uint256 i = 0; i < N_COINS; i++) {
             address coin = IStableSwapPool(poolAddress).coins(i);
             uint256 balance = IERC20(coin).balanceOf(address(this));
@@ -170,7 +174,11 @@ contract CurveControllerTemplate is BaseController {
         return coinsBalances;
     }
 
-    function _compareCoinsBalances(uint256[N_COINS] memory balancesBefore, uint256[N_COINS] memory balancesAfter, uint256[N_COINS] memory amounts) internal {
+    function _compareCoinsBalances(
+        uint256[N_COINS] memory balancesBefore,
+        uint256[N_COINS] memory balancesAfter,
+        uint256[N_COINS] memory amounts
+    ) internal pure {
         for (uint256 i = 0; i < N_COINS; i++) {
             if (amounts[i] > 0) {
                 require(balancesBefore[i] < balancesAfter[i], "BALANCE_MUST_INCREASE");
