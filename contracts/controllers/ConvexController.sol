@@ -9,7 +9,6 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "./BaseController.sol";
 import "../interfaces/convex/IConvexBooster.sol";
 import "../interfaces/convex/IConvexBaseReward.sol";
-import "../interfaces/convex/ConvexPoolInfo.sol";
 
 contract ConvexController is BaseController {
     using SafeERC20 for IERC20;
@@ -48,9 +47,9 @@ contract ConvexController is BaseController {
         require(staking != address(0), "INVALID_STAKING_ADDRESS");
         require(amount > 0, "INVALID_AMOUNT");
 
-        ConvexPoolInfo memory poolInfo = BOOSTER.poolInfo(poolId);
-        require(lpToken == poolInfo.lptoken, "POOL_ID_LP_TOKEN_MISMATCH");
-        require(staking == poolInfo.crvRewards, "POOL_ID_STAKING_MISMATCH");
+        (address lptoken, , , address crvRewards, , ) = BOOSTER.poolInfo(poolId);
+        require(lpToken == lptoken, "POOL_ID_LP_TOKEN_MISMATCH");
+        require(staking == crvRewards, "POOL_ID_STAKING_MISMATCH");
 
         _approve(IERC20(lpToken), amount);
 
