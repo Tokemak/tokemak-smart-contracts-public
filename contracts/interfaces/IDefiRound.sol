@@ -16,9 +16,9 @@ interface IDefiRound {
         address token; // address of the allowed token deposited
         uint256 initialDeposit; // initial amount deposited of the token
         uint256 currentBalance; // current balance of the token that can be used to claim TOKE
-        uint256 effectiveAmt; //Amount deposited that will be used towards TOKE
-        uint256 ineffectiveAmt; //Amount deposited that will be either refunded or go to farming
-        uint256 actualTokeReceived; //Amount of TOKE that will be received
+        uint256 effectiveAmt; // amount deposited that will be used towards TOKE
+        uint256 ineffectiveAmt; // amount deposited that will be either refunded or go to farming
+        uint256 actualTokeReceived; // amount of TOKE that will be received
     }
 
     struct TokenData {
