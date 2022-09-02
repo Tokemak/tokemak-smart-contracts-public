@@ -10,6 +10,8 @@ import "../interfaces/IBalanceTracker.sol";
 import "../interfaces/events/EventWrapper.sol";
 import "../interfaces/events/CycleRolloverEvent.sol";
 import "../interfaces/events/BalanceUpdateEvent.sol";
+import "../interfaces/events/DelegationEnabled.sol";
+import "../interfaces/events/DelegationDisabled.sol";
 
 import "@openzeppelin/contracts/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
@@ -56,6 +58,8 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
     bytes32 public constant EVENT_TYPE_CYCLECOMPLETE = bytes32("Cycle Complete");
     bytes32 public constant EVENT_TYPE_VOTE = bytes32("Vote");
     bytes32 public constant EVENT_TYPE_WITHDRAWALREQUEST = bytes32("Withdrawal Request");
+    bytes32 public constant EVENT_TYPE_DELEGATIONENABLED = bytes32("DelegationEnabled");
+    bytes32 public constant EVENT_TYPE_DELEGATIONDISABLED = bytes32("DelegationDisabled");
 
     //Normally these would only be generated during construction against the current chain id
     //However, our users will be signing while connected to mainnet so we'll need a diff
@@ -162,13 +166,12 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
     /// @param accounts Accounts list that just had their balance updated
     /// @dev Should call back to BalanceTracker to pull that accounts current balance
     function updateUserVoteTotals(address[] memory accounts) public override {
-        for (uint256 i = 0; i < accounts.length; i++) {
+        for (uint256 i = 0; i < accounts.length; ++i) {
             address account = accounts[i];
-
             require(account != address(0), "INVALID_ADDRESS");
-
-            bytes32[] memory keys = userVoteKeys[account];
+            
             uint256 maxAvailableVotes = getMaxVoteBalance(account);
+            bytes32[] memory keys = userVoteKeys[account];
             uint256 maxVotesToUse = Math.min(
                 maxAvailableVotes,
                 userVoteDetails[account].totalUsedVotes
@@ -191,7 +194,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
             //Compute new aggregations
             uint256 total = 0;
             if (maxVotesToUse > 0) {
-                for (uint256 j = 0; j < keys.length; j++) {
+                for (uint256 j = 0; j < keys.length; ++j) {
                     UserVoteAllocationItem memory placement = UserVoteAllocationItem({
                         reactorKey: keys[j],
                         amount: userVoteItems[account][keys[j]]
@@ -214,7 +217,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
             } else {
                 //If these values are left, then when the user comes back and tries to vote
                 //again, the total used won't line up
-                for (uint256 j = 0; j < keys.length; j++) {
+                for (uint256 j = 0; j < keys.length; ++j) {
                     userVoteItems[account][keys[j]] = 0;
                 }
             }
@@ -233,7 +236,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
     function getUserVotes(address account) public view override returns (UserVotes memory) {
         bytes32[] memory keys = userVoteKeys[account];
         UserVoteAllocationItem[] memory placements = new UserVoteAllocationItem[](keys.length);
-        for (uint256 i = 0; i < keys.length; i++) {
+        for (uint256 i = 0; i < keys.length; ++i) {
             placements[i] = UserVoteAllocationItem({
                 reactorKey: keys[i],
                 amount: userVoteItems[account][keys[i]]
@@ -246,7 +249,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
         uint256 placements = allowedreactorKeys.length();
         SystemAllocation[] memory votes = new SystemAllocation[](placements);
         uint256 totalVotes = 0;
-        for (uint256 i = 0; i < placements; i++) {
+        for (uint256 i = 0; i < placements; ++i) {
             votes[i] = SystemAllocation({
                 reactorKey: allowedreactorKeys.at(i),
                 totalVotes: systemAggregations[allowedreactorKeys.at(i)],
@@ -295,7 +298,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
         onlyOwner
     {
         uint256 length = submitters.length;
-        for (uint256 i = 0; i < length; i++) {
+        for (uint256 i = 0; i < length; ++i) {
             proxySubmitters[submitters[i]] = allowed;
         }
 
@@ -309,7 +312,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
     {
         uint256 length = reactorKeys.length;
 
-        for (uint256 i = 0; i < length; i++) {
+        for (uint256 i = 0; i < length; ++i) {
             if (allowed) {
                 require(allowedreactorKeys.add(reactorKeys[i].key), "ADD_FAIL");
                 placementTokens[reactorKeys[i].key] = reactorKeys[i].token;
@@ -326,14 +329,14 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
 
     function setVoteMultiplers(VoteTokenMultipler[] memory multipliers) public override onlyOwner {
         uint256 votingTokenLength = votingTokens.length;
-        if (votingTokenLength > 0) {
-            for (uint256 i = 0; i < votingTokenLength; i++) {
-                votingTokens.pop();
-                voteMultipliers[multipliers[i].token] = 0;
-            }
+
+        for (uint256 i = votingTokenLength; i >= 1; i--) {
+            address oldToken = votingTokens[i - 1];
+            votingTokens.pop();
+            voteMultipliers[oldToken] = 0;
         }
 
-        for (uint256 i = 0; i < multipliers.length; i++) {
+        for (uint256 i = 0; i < multipliers.length; ++i) {
             require(multipliers[i].multiplier > 0, "MULTIPLIER_MUST_EXIST");
             require(voteMultipliers[multipliers[i].token] == 0, "ALREADY_EXISTS");
 
@@ -347,7 +350,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
     function getVotingTokens() external view override returns (address[] memory tokens) {
         uint256 length = votingTokens.length;
         tokens = new address[](length);
-        for (uint256 i = 0; i < length; i++) {
+        for (uint256 i = 0; i < length; ++i) {
             tokens[i] = votingTokens[i];
         }
     }
@@ -362,7 +365,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
         uint256 length = allowedreactorKeys.length();
         reactorKeys = new bytes32[](length);
 
-        for (uint256 i = 0; i < length; i++) {
+        for (uint256 i = 0; i < length; ++i) {
             reactorKeys[i] = allowedreactorKeys.at(i);
         }
     }
@@ -396,13 +399,17 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
             _onBalanceChange(eventType, data);
         } else if (eventType == EVENT_TYPE_VOTE) {
             _onEventVote(data);
+        } else if (eventType == EVENT_TYPE_DELEGATIONENABLED) {
+            _delegationVoteTotalUpdate(data, eventType);
+        } else if (eventType == EVENT_TYPE_DELEGATIONDISABLED) {
+            _delegationVoteTotalUpdate(data, eventType);
         } else {
             revert("INVALID_EVENT_TYPE");
         }
     }
 
     function _removeUserVoteKey(address account, bytes32 reactorKey) internal whenNotPaused {
-        for (uint256 i = 0; i < userVoteKeys[account].length; i++) {
+        for (uint256 i = 0; i < userVoteKeys[account].length; ++i) {
             if (userVoteKeys[account][i] == reactorKey) {
                 userVoteKeys[account][i] = userVoteKeys[account][userVoteKeys[account].length - 1];
                 userVoteKeys[account].pop();
@@ -424,7 +431,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
         // Ensure the message cannot be replayed
         userNonces[userVotePayload.account] = userNonces[userVotePayload.account].add(1);
 
-        for (uint256 i = 0; i < userVotePayload.allocations.length; i++) {
+        for (uint256 i = 0; i < userVotePayload.allocations.length; ++i) {
             bytes32 reactorKey = userVotePayload.allocations[i].reactorKey;
             uint256 amount = userVotePayload.allocations[i].amount;
 
@@ -497,7 +504,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
     }
 
     function _getVotingPower(TokenBalance[] memory balances) private view returns (uint256 votes) {
-        for (uint256 i = 0; i < balances.length; i++) {
+        for (uint256 i = 0; i < balances.length; ++i) {
             votes = votes.add(
                 balances[i].amount.mul(voteMultipliers[balances[i].token]).div(
                     ONE_WITH_EIGHTEEN_PRECISION
@@ -524,6 +531,24 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
         if (eventType == EVENT_TYPE_WITHDRAWALREQUEST) {
             UserVotes memory postVotes = getUserVotes(e.account);
             emit WithdrawalRequestApplied(e.account, postVotes);
+        }
+    }
+
+    function _delegationVoteTotalUpdate(bytes calldata data, bytes32 eventType) private {
+        DelegationEnabled memory e = abi.decode(data, (DelegationEnabled));
+
+        if(e.functionId == "voting") {
+          address delegator = e.from;
+          address [] memory accounts = new address[](2);
+          accounts[0] = e.to;
+          accounts[1] = delegator;
+          updateUserVoteTotals(accounts);
+
+          if(eventType == EVENT_TYPE_DELEGATIONENABLED) {
+            emit DelegatorUpdate(delegator, true);
+          } else {
+            emit DelegatorUpdate(delegator, false);
+          }
         }
     }
 
@@ -581,7 +606,7 @@ contract VoteTracker is Initializable, EventReceiver, IVoteTracker, Ownable, Pau
 
     function _hashUserVotePayload(UserVotePayload memory userVote) private view returns (bytes32) {
         bytes32[] memory encodedVotes = new bytes32[](userVote.allocations.length);
-        for (uint256 ix = 0; ix < userVote.allocations.length; ix++) {
+        for (uint256 ix = 0; ix < userVote.allocations.length; ++ix) {
             encodedVotes[ix] = _hashUserVoteAllocationItem(userVote.allocations[ix]);
         }
 

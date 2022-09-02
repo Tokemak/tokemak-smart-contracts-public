@@ -24,9 +24,10 @@ contract ConvexController is BaseController {
 
     constructor(
         address _manager,
+        address _accessControl,
         address _addressRegistry,
         address _convexBooster
-    ) public BaseController(_manager, _addressRegistry) {
+    ) public BaseController(_manager, _accessControl, _addressRegistry) {
         require(_convexBooster != address(0), "INVALID_BOOSTER_ADDRESS");
 
         BOOSTER = IConvexBooster(_convexBooster);
@@ -42,13 +43,13 @@ contract ConvexController is BaseController {
         address staking,
         uint256 poolId,
         uint256 amount
-    ) external onlyManager {
+    ) external onlyManager onlyAddLiquidity {
         require(addressRegistry.checkAddress(lpToken, 0), "INVALID_LP_TOKEN");
         require(staking != address(0), "INVALID_STAKING_ADDRESS");
         require(amount > 0, "INVALID_AMOUNT");
 
-        (address lptoken, , , address crvRewards, , ) = BOOSTER.poolInfo(poolId);
-        require(lpToken == lptoken, "POOL_ID_LP_TOKEN_MISMATCH");
+        (address poolLpToken, , , address crvRewards, , ) = BOOSTER.poolInfo(poolId);
+        require(lpToken == poolLpToken, "POOL_ID_LP_TOKEN_MISMATCH");
         require(staking == crvRewards, "POOL_ID_STAKING_MISMATCH");
 
         _approve(IERC20(lpToken), amount);
@@ -73,7 +74,7 @@ contract ConvexController is BaseController {
         address lpToken,
         address staking,
         uint256 amount
-    ) external onlyManager {
+    ) external onlyManager onlyRemoveLiquidity {
         require(addressRegistry.checkAddress(lpToken, 0), "INVALID_LP_TOKEN");
         require(staking != address(0), "INVALID_STAKING_ADDRESS");
         require(amount > 0, "INVALID_AMOUNT");
@@ -90,29 +91,28 @@ contract ConvexController is BaseController {
     /// @notice claims all Convex rewards associated with the target Curve LP token
     /// @param staking Convex reward contract associated with the Curve LP token
     /// @param expectedRewards List of expected reward tokens and min amounts to receive on claim
-    function claimRewards(address staking, ExpectedReward[] memory expectedRewards)
+    function claimRewards(address staking, ExpectedReward[] calldata expectedRewards)
         external
-        onlyManager
+        onlyManager onlyMiscOperation
     {
         require(staking != address(0), "INVALID_STAKING_ADDRESS");
         require(expectedRewards.length > 0, "INVALID_EXPECTED_REWARDS");
 
         uint256[] memory beforeBalances = new uint256[](expectedRewards.length);
 
-        for (uint256 i = 0; i < expectedRewards.length; i++) {
+        for (uint256 i = 0; i < expectedRewards.length; ++i) {
             require(expectedRewards[i].token != address(0), "INVALID_REWARD_TOKEN_ADDRESS");
             require(expectedRewards[i].minAmount > 0, "INVALID_MIN_REWARD_AMOUNT");
             beforeBalances[i] = IERC20(expectedRewards[i].token).balanceOf(address(this));
         }
 
-        bool success = IConvexBaseRewards(staking).getReward();
-        require(success, "CLAIM_REWARD_FAILED");
+        require(IConvexBaseRewards(staking).getReward(), "CLAIM_REWARD_FAILED");
 
-        for (uint256 i = 0; i < expectedRewards.length; i++) {
+        for (uint256 i = 0; i < expectedRewards.length; ++i) {
             uint256 balanceChange = IERC20(expectedRewards[i].token).balanceOf(address(this)).sub(
                 beforeBalances[i]
             );
-            require(balanceChange > expectedRewards[i].minAmount, "BALANCE_MUST_INCREASE");
+            require(balanceChange >= expectedRewards[i].minAmount, "BALANCE_MUST_INCREASE");
         }
     }
 

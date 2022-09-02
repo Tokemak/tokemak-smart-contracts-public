@@ -15,9 +15,10 @@ contract TransferController is BaseController {
 
     constructor(
         address manager,
+        address accessControl,
         address addressRegistry,
         address treasury
-    ) public BaseController(manager, addressRegistry) {
+    ) public BaseController(manager, accessControl, addressRegistry) {
         require(treasury != address(0), "INVALID_TREASURY_ADDRESS");
         treasuryAddress = treasury;
     }
@@ -26,7 +27,7 @@ contract TransferController is BaseController {
     /// @dev Calls into external contract
     /// @param tokenAddress Address of IERC20 token
     /// @param amount amount of funds to transfer
-    function transferFunds(address tokenAddress, uint256 amount) external onlyManager {
+    function transferFunds(address tokenAddress, uint256 amount) external onlyManager onlyMiscOperation {
         require(tokenAddress != address(0), "INVALID_TOKEN_ADDRESS");
         require(amount > 0, "INVALID_AMOUNT");
         require(addressRegistry.checkAddress(tokenAddress, 0), "INVALID_TOKEN");
