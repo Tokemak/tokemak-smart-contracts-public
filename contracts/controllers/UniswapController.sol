@@ -26,8 +26,9 @@ contract UniswapController is BaseController {
         IUniswapV2Router02 router,
         IUniswapV2Factory factory,
         address manager,
-        address _addressRegistry
-    ) public BaseController(manager, _addressRegistry) {
+        address accessControl,
+        address addressRegistry
+    ) public BaseController(manager, accessControl, addressRegistry) {
         require(address(router) != address(0), "INVALID_ROUTER");
         require(address(factory) != address(0), "INVALID_FACTORY");
         UNISWAP_ROUTER = router;
@@ -37,7 +38,7 @@ contract UniswapController is BaseController {
     /// @notice Deploys liq to Uniswap LP pool
     /// @dev Calls to external contract
     /// @param data Bytes containing token addrs, amounts, pool addr, dealine to interact with Uni router
-    function deploy(bytes calldata data) external onlyManager {
+    function deploy(bytes calldata data) external onlyManager onlyAddLiquidity {
         (
             address tokenA,
             address tokenB,
@@ -81,7 +82,7 @@ contract UniswapController is BaseController {
     /// @notice Withdraws liq from Uni LP pool
     /// @dev Calls to external contract
     /// @param data Bytes contains tokens addrs, amounts, liq, pool addr, dealine for Uni router
-    function withdraw(bytes calldata data) external onlyManager {
+    function withdraw(bytes calldata data) external onlyManager onlyRemoveLiquidity {
         (
             address tokenA,
             address tokenB,

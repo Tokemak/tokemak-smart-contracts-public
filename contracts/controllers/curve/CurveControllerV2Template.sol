@@ -1,18 +1,40 @@
 // SPDX-License-Identifier: MIT
 
 pragma solidity 0.6.11;
-pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
-import "../interfaces/curve/IStableSwapPool.sol";
-import "../interfaces/curve/IRegistry.sol";
-import "../interfaces/curve/IAddressProvider.sol";
-import "./BaseController.sol";
+import "../../interfaces/curve/ICryptoSwapPool.sol";
+import "../../interfaces/curve/IRegistry.sol";
+import "../../interfaces/curve/IAddressProvider.sol";
+import "../BaseController.sol";
 
-contract CurveControllerTemplate is BaseController {
+/* solhint-disable func-name-mixedcase, var-name-mixedcase */
+contract CurveControllerV2Template is BaseController {
+    event AddLiquidity(
+        address indexed provider,
+        uint256[N_COINS] token_amounts,
+        uint256 token_supply,
+        uint256 lp_token_amount
+    );
+
+    event RemoveLiquidity(
+        address indexed provider,
+        uint256[N_COINS] token_amounts,
+        uint256 token_supply,
+        uint256[N_COINS] amounts
+    );
+
+    event RemoveLiquidityOne(
+        address indexed provider,
+        uint256 token_amount,
+        uint256 coin_index,
+        uint256 coin_amount,
+        address coin_address
+    );
+
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
@@ -22,12 +44,13 @@ contract CurveControllerTemplate is BaseController {
     uint256 public constant N_COINS = 2;
 
     constructor(
-        address manager,
-        address addressRegistry,
-        address curveAddressProvider
-    ) public BaseController(manager, addressRegistry) {
-        require(curveAddressProvider != address(0), "INVALID_CURVE_ADDRESS_PROVIDER");
-        addressProvider = IAddressProvider(curveAddressProvider);
+        address _manager,
+        address _accessControl,
+        address _addressRegistry,
+        IAddressProvider _curveAddressProvider
+    ) public BaseController(_manager, _accessControl, _addressRegistry) {
+        require(address(_curveAddressProvider) != address(0), "INVALID_CURVE_ADDRESS_PROVIDER");
+        addressProvider = _curveAddressProvider;
     }
 
     /// @notice Deploy liquidity to Curve pool
@@ -38,15 +61,15 @@ contract CurveControllerTemplate is BaseController {
     /// @param poolAddress Minimum amount of LP tokens to mint from the deposit
     function deploy(
         address poolAddress,
-        uint256[N_COINS] memory amounts,
+        uint256[N_COINS] calldata amounts,
         uint256 minMintAmount
-    ) external onlyManager {
+    ) external onlyManager onlyAddLiquidity {
         address lpTokenAddress = _getLPToken(poolAddress);
         uint256 amountsLength = amounts.length;
 
-        for (uint256 i = 0; i < amountsLength; i++) {
+        for (uint256 i = 0; i < amountsLength; ++i) {
             if (amounts[i] > 0) {
-                address coin = IStableSwapPool(poolAddress).coins(i);
+                address coin = ICryptoSwapPool(poolAddress).coins(i);
 
                 require(addressRegistry.checkAddress(coin, 0), "INVALID_COIN");
 
@@ -59,36 +82,14 @@ contract CurveControllerTemplate is BaseController {
         }
 
         uint256 lpTokenBalanceBefore = IERC20(lpTokenAddress).balanceOf(address(this));
-        IStableSwapPool(poolAddress).add_liquidity(amounts, minMintAmount);
+        ICryptoSwapPool(poolAddress).add_liquidity(amounts, minMintAmount);
         uint256 lpTokenBalanceAfter = IERC20(lpTokenAddress).balanceOf(address(this));
 
-        require(lpTokenBalanceAfter.sub(lpTokenBalanceBefore) >= minMintAmount, "LP_AMT_TOO_LOW");
-    }
+        uint256 lpTokenAmount = lpTokenBalanceAfter.sub(lpTokenBalanceBefore);
 
-    /// @notice Withdraw liquidity from Curve pool
-    /// @dev Calls to external contract
-    /// @dev We trust sender to send a true curve poolAddress. If it's not the case it will fail in the add_liquidity part.
-    /// @param poolAddress Token addresses
-    /// @param amounts List of amounts of underlying coins to withdraw
-    /// @param maxBurnAmount Maximum amount of LP token to burn in the withdrawal
-    function withdrawImbalance(
-        address poolAddress,
-        uint256[N_COINS] memory amounts,
-        uint256 maxBurnAmount
-    ) external onlyManager {
-        address lpTokenAddress = _getLPTokenAndApprove(poolAddress, maxBurnAmount);
+        require(lpTokenAmount >= minMintAmount, "LP_AMT_TOO_LOW");
 
-        uint256 lpTokenBalanceBefore = IERC20(lpTokenAddress).balanceOf(address(this));
-        uint256[N_COINS] memory coinsBalancesBefore = _getCoinsBalances(poolAddress);
-
-        IStableSwapPool(poolAddress).remove_liquidity_imbalance(amounts, maxBurnAmount);
-
-        uint256 lpTokenBalanceAfter = IERC20(lpTokenAddress).balanceOf(address(this));
-        uint256[N_COINS] memory coinsBalancesAfter = _getCoinsBalances(poolAddress);
-
-        _compareCoinsBalances(coinsBalancesBefore, coinsBalancesAfter, amounts);
-
-        require(lpTokenBalanceBefore.sub(lpTokenBalanceAfter) <= maxBurnAmount, "LP_COST_TOO_HIGH");
+        emit AddLiquidity(msg.sender, amounts, IERC20(lpTokenAddress).totalSupply(), lpTokenAmount);
     }
 
     /// @notice Withdraw liquidity from Curve pool
@@ -101,20 +102,22 @@ contract CurveControllerTemplate is BaseController {
         address poolAddress,
         uint256 amount,
         uint256[N_COINS] memory minAmounts
-    ) external onlyManager {
+    ) external onlyManager onlyRemoveLiquidity {
         address lpTokenAddress = _getLPTokenAndApprove(poolAddress, amount);
 
         uint256 lpTokenBalanceBefore = IERC20(lpTokenAddress).balanceOf(address(this));
         uint256[N_COINS] memory coinsBalancesBefore = _getCoinsBalances(poolAddress);
 
-        IStableSwapPool(poolAddress).remove_liquidity(amount, minAmounts);
+        ICryptoSwapPool(poolAddress).remove_liquidity(amount, minAmounts);
 
         uint256 lpTokenBalanceAfter = IERC20(lpTokenAddress).balanceOf(address(this));
         uint256[N_COINS] memory coinsBalancesAfter = _getCoinsBalances(poolAddress);
 
         _compareCoinsBalances(coinsBalancesBefore, coinsBalancesAfter, minAmounts);
 
-        require(lpTokenBalanceBefore - amount == lpTokenBalanceAfter, "LP_TOKEN_AMT_MISMATCH");
+        require(lpTokenBalanceBefore.sub(amount) == lpTokenBalanceAfter, "LP_TOKEN_AMT_MISMATCH");
+
+        emit RemoveLiquidity(msg.sender, coinsBalancesAfter, IERC20(lpTokenAddress).totalSupply(), minAmounts);
     }
 
     /// @notice Withdraw liquidity from Curve pool
@@ -127,22 +130,26 @@ contract CurveControllerTemplate is BaseController {
     function withdrawOneCoin(
         address poolAddress,
         uint256 tokenAmount,
-        int128 i,
+        uint256 i,
         uint256 minAmount
-    ) external onlyManager {
+    ) external onlyManager onlyRemoveLiquidity {
         address lpTokenAddress = _getLPTokenAndApprove(poolAddress, tokenAmount);
-        address coin = IStableSwapPool(poolAddress).coins(uint256(i));
+        address coin = ICryptoSwapPool(poolAddress).coins(uint256(i));
 
         uint256 lpTokenBalanceBefore = IERC20(lpTokenAddress).balanceOf(address(this));
         uint256 coinBalanceBefore = IERC20(coin).balanceOf(address(this));
 
-        IStableSwapPool(poolAddress).remove_liquidity_one_coin(tokenAmount, i, minAmount);
+        ICryptoSwapPool(poolAddress).remove_liquidity_one_coin(tokenAmount, i, minAmount);
 
         uint256 lpTokenBalanceAfter = IERC20(lpTokenAddress).balanceOf(address(this));
         uint256 coinBalanceAfter = IERC20(coin).balanceOf(address(this));
 
         require(coinBalanceBefore < coinBalanceAfter, "BALANCE_MUST_INCREASE");
-        require(lpTokenBalanceBefore - tokenAmount == lpTokenBalanceAfter, "LP_TOKEN_AMT_MISMATCH");
+        require(lpTokenBalanceBefore.sub(tokenAmount) == lpTokenBalanceAfter, "LP_TOKEN_AMT_MISMATCH");
+
+        uint256 coin_amount = ICryptoSwapPool(poolAddress).calc_withdraw_one_coin(minAmount, i);
+
+        emit RemoveLiquidityOne(msg.sender, tokenAmount, i, coin_amount, coin);
     }
 
     function _getLPToken(address poolAddress) internal returns (address) {
@@ -162,12 +169,9 @@ contract CurveControllerTemplate is BaseController {
         return lpTokenAddress;
     }
 
-    function _getCoinsBalances(address poolAddress)
-        internal
-        returns (uint256[N_COINS] memory coinsBalances)
-    {
-        for (uint256 i = 0; i < N_COINS; i++) {
-            address coin = IStableSwapPool(poolAddress).coins(i);
+    function _getCoinsBalances(address poolAddress) internal returns (uint256[N_COINS] memory coinsBalances) {
+        for (uint256 i = 0; i < N_COINS; ++i) {
+            address coin = ICryptoSwapPool(poolAddress).coins(i);
             uint256 balance = IERC20(coin).balanceOf(address(this));
             coinsBalances[i] = balance;
         }
@@ -179,10 +183,9 @@ contract CurveControllerTemplate is BaseController {
         uint256[N_COINS] memory balancesAfter,
         uint256[N_COINS] memory amounts
     ) internal pure {
-        for (uint256 i = 0; i < N_COINS; i++) {
-            if (amounts[i] > 0) {
-                require(balancesBefore[i] < balancesAfter[i], "BALANCE_MUST_INCREASE");
-            }
+        for (uint256 i = 0; i < N_COINS; ++i) {
+            uint256 minAmount = amounts[i];
+            require(balancesAfter[i].sub(balancesBefore[i]) >= minAmount, "INVALID_BALANCE_CHANGE");
         }
     }
 
