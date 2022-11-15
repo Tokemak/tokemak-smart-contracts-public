@@ -52,7 +52,7 @@ interface ILiquidityEthPool {
 
     /// @notice Get withdraw requests for an account
     /// @param account User account to check
-    /// @return minCycle Cycle - block number - that must be active before withdraw is allowed, amount Token amount requested
+    /// @return minCycle Cycle - index - that must be active before withdraw is allowed, amount Token amount requested
     function requestedWithdrawals(address account) external view returns (uint256, uint256);
 
     /// @notice Pause deposits on the pool. Withdraws still allowed
